@@ -20,7 +20,7 @@ helmflow/                                    # 本仓库(独立于 HelmCode)
 ├── apps/                                    # 可运行应用
 │   ├── portal/                              # ✅ Goal 1 已就位:Next.js 15 web UI(全景矩阵)
 │   ├── orchestrator/                        # Phase 1 加:后端编排服务(Next API routes 或独立 Hono)
-│   └── cli/                                 # Phase 1 加:helmflow CLI(`helmflow start <feature-id>`)
+│   └── cli/                                 # Phase 1 加:HelmFlow CLI(`helmflow start <feature-id>`)
 │
 ├── infra/                                   # 部署配置(Phase 2 加)
 │   ├── docker/                              # Dockerfile + docker-compose.yml
@@ -405,7 +405,7 @@ apps/cli/
 
 ## 5. 包名命名
 
-helmflow 内部 package 用 `@helmflow/` scope:
+HelmFlow 内部 package 用 `@helmflow/` scope:
 - `@helmflow/agent-core`
 - `@helmflow/contract-schema`
 - `@helmflow/matrix-schema`
@@ -480,23 +480,23 @@ packages:
 
 **两个仓库职责完全分离**:
 
-| 仓库 | 角色 | 内容 |
+| 仓库(品牌 / repo URL) | 角色 | 内容 |
 |---|---|---|
-| https://github.com/wanlihang/helmcode | 轻量"标准+模板+skill 安装器" | `bin/helmcode.mjs`、`install.mjs/sh`、`core/{clarify,implement,...}`、`standards/java-ddd`、`loader/`、`commands/`、`scripts/` |
-| https://github.com/wanlihang/helmflow(本仓库) | 中台 web + agent + sandbox | `apps/portal`、`packages/*`、`infra/*`、`docs/architecture/*` |
+| **HelmCode** / [helmcode](https://github.com/wanlihang/helmcode) | 轻量"标准+模板+skill 安装器" | `bin/helmcode.mjs`、`install.mjs/sh`、`core/{clarify,implement,...}`、`standards/java-ddd`、`loader/`、`commands/`、`scripts/` |
+| **HelmFlow** / [helmflow](https://github.com/wanlihang/helmflow)(本仓库) | 中台 web + agent + sandbox | `apps/portal`、`packages/*`、`infra/*`、`docs/architecture/*` |
 
 **复用方式**:
 
-| HelmCode 资产 | helmflow 复用形式 | 阶段 |
+| HelmCode 资产 | HelmFlow 复用形式 | 阶段 |
 |---|---|---|
-| `standards/java-ddd/` | 直接复制到 helmflow `standards/` | MVP(已完成) |
-| `core/init-java-ddd/references/*.md`(error-codes / package-structure / antipatterns / sequence-gotchas / sofa-starter-index) | 直接复制到 helmflow `references/` | MVP(已完成) |
+| `standards/java-ddd/` | 直接复制到 `helmflow/standards/` | MVP(已完成) |
+| `core/init-java-ddd/references/*.md`(error-codes / package-structure / antipatterns / sequence-gotchas / sofa-starter-index) | 直接复制到 `helmflow/references/` | MVP(已完成) |
 | `core/{clarify,implement,verify,...}/SKILL.md` prompt | 抽到 `packages/agent-core/prompts/*.system.md`(手动同步 / V1 抽 npm 包) | Phase 1 |
-| `core/init-java-ddd/templates/*` 模板 | 不直接复用;helmflow 通过 adapter 调用项目的本地资源 | — |
+| `core/init-java-ddd/templates/*` 模板 | 不直接复用;HelmFlow 通过 adapter 调用项目的本地资源 | — |
 
-**V1 升级路径**:把 `standards-java-ddd` 抽出来发 `@helmcode/standards-java-ddd` npm 包,helmcode 与 helmflow 都 `import` 同一份,避免冗余维护。MVP 阶段复制版可接受。
+**V1 升级路径**:把 `standards-java-ddd` 抽出来发 `@helmcode/standards-java-ddd` npm 包,HelmCode 与 HelmFlow 都 `import` 同一份,避免冗余维护。MVP 阶段复制版可接受。
 
-**CLI 命名空间不冲突**:HelmCode CLI 仍是 `helmcode xxx`(install / status / update);helmflow CLI 是 `helmflow xxx`(start / orchestrate / matrix)。
+**CLI 命名空间不冲突**:HelmCode CLI 仍是 `helmcode xxx`(install / status / update);HelmFlow CLI 是 `helmflow xxx`(start / orchestrate / matrix)。
 
 ---
 

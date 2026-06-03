@@ -573,7 +573,7 @@ domains:
 | Q7 | MVP 范围 | 单项目 / 多项目 | **单项目(mycmdeliverhub)验证** |
 | Q8 | 人介入策略 | 严格 2 点 / 可配置 / 全自动 | **MVP 严格 2 点,V2 P3 feature 可 auto-approve** |
 | Q9 | 模型组合 | 全 Opus / Mixed / 全 Haiku | **Mixed**:Worker Opus,Critic Haiku |
-| Q10 | 命名空间 | 在 HelmCode 仓库内 / 拆新仓库 | **独立 helmflow 仓库**(2026-06-03 已拍板,见 §11) |
+| Q10 | 命名空间 | 在 HelmCode 仓库内 / 拆新仓库 | **独立 `helmflow` 仓库**(2026-06-03 已拍板,见 §11) |
 
 ---
 
@@ -583,7 +583,7 @@ domains:
 
 | 决策 | 状态 |
 |---|---|
-| **helmflow 独立仓库**(本仓库) | ✅ 已建:https://github.com/wanlihang/helmflow |
+| **HelmFlow 独立仓库**(本仓库,`helmflow`) | ✅ 已建:https://github.com/wanlihang/helmflow |
 | HelmCode 保留为轻量库,继续维护 standards / skills / CLI | ✅ https://github.com/wanlihang/helmcode |
 | 复用方式:MVP 阶段直接复制 standards/references;V1 抽 `@helmcode/standards-*` npm 包 | MVP 已完成 |
 
@@ -597,12 +597,12 @@ domains:
 
 ### Phase 1 启动(Goal 3 后)
 
-1. helmflow 仓库根目录 `pnpm init` + `pnpm-workspace.yaml`(monorepo 化)
+1. `helmflow` 仓库根目录 `pnpm init` + `pnpm-workspace.yaml`(monorepo 化)
 2. 创建 `packages/contract-schema`(Zod 全套)
 3. `packages/agent-core` 拆 5 角色基础架构(Worker + Critic 独立调用)
 4. `apps/cli` 加 `helmflow start <feature-id>` 命令(终端跑通无 web)
 
-> 注意:中台 CLI 命令是 `helmflow xxx`(本仓库),HelmCode CLI 仍是 `helmcode xxx`(标准安装器)。两者职责清晰分离。
+> 注意:HelmFlow CLI 命令是 `helmflow xxx`(本仓库),HelmCode CLI 仍是 `helmcode xxx`(标准安装器)。两者职责清晰分离。
 
 **我推荐 A**:协议错了后面全要重写,先把协议跑通在 mycmdeliverhub 上验证,再投入 monorepo 骨架。
 

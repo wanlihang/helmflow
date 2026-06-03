@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>helmflow</strong>
+  <strong>HelmFlow</strong>
 </p>
 
 <p align="center">
@@ -10,16 +10,16 @@
 <p align="center">
   <a href="https://github.com/wanlihang/helmcode">⚓ HelmCode</a>(轻量标准库)
   ·
-  <a href="https://github.com/wanlihang/helmflow">🚢 helmflow</a>(本仓库,中台)
+  <a href="https://github.com/wanlihang/helmflow">🚢 HelmFlow</a>(本仓库,中台)
 </p>
 
 ---
 
-## Why helmflow
+## Why HelmFlow
 
 [HelmCode](https://github.com/wanlihang/helmcode) 把 AI coding 的"单 feature 闭环"做到了产品级:行为契约 + Judgment Log + `/goal` 自主循环 + Tests N≥1 反假阳性 + ArchUnit/BootContextSmokeTest 装配验证。
 
-**helmflow 是 HelmCode 的下一阶段** — 把闭环从"单 feature"放大到"全流程多 agent IDP":
+**HelmFlow 是 HelmCode 的下一阶段** — 把闭环从"单 feature"放大到"全流程多 agent IDP":
 
 - **业务场景 × 功能点全景视图**(Backstage 风格,Next.js 渲染)
 - **5 节点 agent 流水线**:Clarifier / Coder / TestGen / QA / Committer
@@ -80,9 +80,21 @@ helmflow/
 ## 与 HelmCode 的关系
 
 - **HelmCode**:轻量"标准 + 模板 + skill 安装器",通过 `helmcode install` 装到任何项目;持续维护标准与最佳实践
-- **helmflow**:中台 web 应用,接入符合 `helmcode.yaml` manifest 的多项目;依赖 HelmCode 的标准(V1 通过 `@helmcode/standards-*` npm 包共享)
+- **HelmFlow**:中台 web 应用,接入符合 `helmcode.yaml` manifest 的多项目;依赖 HelmCode 的标准(V1 通过 `@helmcode/standards-*` npm 包共享)
 
 两个仓库职责分离,各自独立发版。
+
+## 命名约定
+
+| 用途 | 写法 | 例子 |
+|------|------|------|
+| 品牌名 / 文档标题 | `HelmFlow` (CamelCase) | "HelmFlow 是..." / `## Why HelmFlow` |
+| GitHub 仓库 / 目录 | `helmflow` (lowercase) | `github.com/wanlihang/helmflow` / `helmflow/apps/portal/` |
+| npm scope | `@helmflow/*` (lowercase) | `@helmflow/agent-core` |
+| CLI 命令 | `helmflow xxx` (lowercase) | `helmflow start <feature-id>` |
+| Docker 镜像 | `helmflow/xxx` (lowercase) | `helmflow/java-ddd-sofa-21:latest` |
+
+HelmCode 同规则:品牌名 `HelmCode`,URL/CLI/包名 `helmcode`。
 
 ## License
 
