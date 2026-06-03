@@ -1,0 +1,43 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# 包管理器
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# 环境配置(本地)
+.env*.local
+.env.local
+.env.development.local
+.env.production.local
+
+# Next.js
+next-env.d.ts
+
+# 测试/沙箱产物
+.test-output/
+coverage/
+.nyc_output/
+
+# 临时
+*.swp
+*.swo
+.cache/
+
+# Sandbox / orchestration runtime(后续 Phase 引入)
+.helmflow/sandbox/
+.helmflow/runs/
+
+# Claude Code 本地 dogfood 产物
+.claude/
+CLAUDE.md

@@ -1,0 +1,570 @@
+project: mycmdeliverhub
+description: 交付中枢平台 — 5 域 40 功能点
+schemaVersion: 1
+domains:
+  - id: deliver
+    name: 交付管理
+    features:
+      - id: D-01
+        name: 创建交付需求
+        legacy:
+          flowCode: PIPELINE_SAVE_DELIVER_RECORD
+          activities:
+            - SaveDeliverRecordActivity
+            - CreateSopFlowInstanceActivity
+            - CreateDeliverTaskActivity
+            - SyncDeliverRecordToMultiTableActivity
+            - PushFlowNodeInstanceActivity
+        target:
+          handler: SaveDeliverRecordHandler
+          actions:
+            - SaveDeliverRecordAction
+            - CreateFlowInstanceAction
+            - CreateDeliverTaskAction
+            - SyncMultiTableAction
+            - PushFlowNodeAction
+          context: deliver
+        priority: P0
+        status: not-started
+      - id: D-02
+        name: 识别客户类型
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: deliver
+        priority: P2
+        status: not-started
+      - id: D-03
+        name: 判定签约模式
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: deliver
+        priority: P2
+        status: not-started
+      - id: D-04
+        name: 创建关联交付需求(已废弃)
+        legacy:
+          flowCode: CREATE_RELATE_DELIVER_RECORD_FLOW
+          activities:
+            - SaveRelateDeliverRecordActivity
+            - CreateSopFlowInstanceActivity
+            - PushFlowNodeInstanceToPriceActivity
+        target:
+          handler: ""
+          actions: []
+          context: deliver
+        priority: P2
+        status: not-started
+      - id: D-05
+        name: 交付记录前进到下一阶段
+        legacy:
+          flowCode: PIPELINE_FORWARD_DELIVER_RECORD
+          activities:
+            - ForwardDeliverRecordActivity
+            - SyncDeliverRecordToMultiTableActivity
+            - PushFlowNodeInstanceActivity
+        target:
+          handler: ForwardDeliverRecordHandler
+          actions:
+            - ForwardDeliverRecordAction
+            - SyncMultiTableAction
+            - PushFlowNodeAction
+          context: deliver
+        priority: P0
+        status: not-started
+      - id: D-06
+        name: 交付记录回退到上一阶段
+        legacy:
+          flowCode: PIPELINE_BACK_DELIVER_RECORD
+          activities:
+            - CheckDeliverRecordReverseActivity
+            - BackDeliverRecordActivity
+            - BackDeliverTaskActivity
+            - SyncDeliverRecordToMultiTableActivity
+            - BackFlowNodeInstanceActivity
+        target:
+          handler: BackDeliverRecordHandler
+          actions:
+            - CheckReverseAction
+            - BackDeliverRecordAction
+            - BackDeliverTaskAction
+            - SyncMultiTableAction
+            - BackFlowNodeAction
+          context: deliver
+        priority: P1
+        status: not-started
+      - id: D-07
+        name: 交付记录删除
+        legacy:
+          flowCode: DELETE_DELIVER_RECORD_FLOW
+          activities:
+            - CheckDeliverRecordReverseActivity
+            - DeleteDeliverRecordActivity
+            - DeleteDeliverTaskActivity
+        target:
+          handler: DeleteDeliverRecordHandler
+          actions:
+            - CheckReverseAction
+            - DeleteDeliverRecordAction
+            - DeleteDeliverTaskAction
+          context: deliver
+        priority: P1
+        status: not-started
+      - id: D-08
+        name: 交付需求详情查询
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: deliver
+        priority: P2
+        status: not-started
+      - id: D-09
+        name: 交付需求列表分页查询
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: deliver
+        priority: P2
+        status: not-started
+      - id: D-10
+        name: SOP流程实例创建
+        legacy:
+          flowCode: DELIVER_FLOW_INSTANCE_CREATE_FLOW
+          activities:
+            - DeliverFlowTempCreateActivity
+            - DeliverFlowTempPersistenceActivity
+        target:
+          handler: DeliverFlowInstanceCreateHandler
+          actions:
+            - DeliverFlowTempCreateAction
+            - DeliverFlowTempPersistenceAction
+          context: deliver
+        priority: P0
+        status: not-started
+  - id: mapping
+    name: 产品映射
+    features:
+      - id: P-01
+        name: 保存产品映射
+        legacy:
+          flowCode: PRODUCT_MAPPING_FIRST_STAGE
+          activities:
+            - SavePdMappingActivity
+        target:
+          handler: ProductMappingSubmitHandler
+          actions:
+            - SavePdMappingAction
+          context: mapping
+        priority: P0
+        status: not-started
+      - id: P-02
+        name: 提交产品映射审批
+        legacy:
+          flowCode: PRODUCT_MAPPING_FIRST_STAGE
+          activities:
+            - PdMappingSubmitProcessActivity
+        target:
+          handler: ProductMappingSubmitHandler
+          actions:
+            - SubmitMappingProcessAction
+          context: mapping
+        priority: P0
+        status: not-started
+      - id: P-03
+        name: 产品映射审批通过处理
+        legacy:
+          flowCode: PRODUCT_MAPPING_SECOND_STAGE
+          activities:
+            - ForwardDeliverRecordActivity
+            - SaveDeliverProdConfigToTaskActivity
+            - SyncDeliverRecordToMultiTableActivity
+            - PushFlowNodeInstanceActivity
+            - CreateRelatedDeliverRecordActivity
+            - TriggerQtAutoSignActivity
+        target:
+          handler: ProductMappingSecondStageHandler
+          actions:
+            - BuildSignModelTreeAction
+            - ForwardOnMappingApprovedAction
+            - SaveProdConfigAction
+            - SyncMultiTableAction
+            - PushFlowNodeAction
+            - CreateRelatedDeliverRecordAction
+            - TriggerQtAutoSignAction
+          context: mapping
+        priority: P0
+        status: not-started
+      - id: P-04
+        name: 产品映射审批拒绝/撤回
+        legacy:
+          flowCode: PRODUCT_MAPPING_SECOND_STAGE
+          activities:
+            - PdMappingProcessRejectActivity
+            - PdMappingProcessCancelActivity
+        target:
+          handler: ProductMappingSecondStageHandler
+          actions:
+            - PdMappingRejectAction
+            - PdMappingCancelAction
+          context: mapping
+        priority: P1
+        status: not-started
+      - id: P-05
+        name: 审批路由(内化到 route())
+        legacy:
+          flowCode: PRODUCT_MAPPING_SECOND_STAGE
+          activities:
+            - PdMappingProcessCallbackRouteActivity
+        target:
+          handler: ProductMappingSecondStageHandler
+          actions: []
+          context: mapping
+        priority: P1
+        status: not-started
+      - id: P-06
+        name: 产品树查询
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: mapping
+        priority: P2
+        status: not-started
+      - id: P-07
+        name: 触发钱塘自研产品签约
+        legacy:
+          flowCode: QT_FUSION_AUTO_SIGN_FLOW
+          activities:
+            - CreateQtFusionDetailAndPriceActivity
+            - QtFusionProdOnlineUpdateActivity
+        target:
+          handler: QtFusionAutoSignHandler
+          actions:
+            - CreateQtFusionDetailAndPriceAction
+            - QtFusionProdOnlineUpdateAction
+          context: signing
+        priority: P0
+        status: not-started
+  - id: pricing
+    name: 价格配置
+    features:
+      - id: PR-01
+        name: 价格预校验
+        legacy:
+          flowCode: PRICE_APPLY_CHECK
+          activities:
+            - CheckPriceConfigActivity
+        target:
+          handler: PriceApplyCheckHandler
+          actions:
+            - CheckPriceConfigAction
+          context: pricing
+        priority: P0
+        status: not-started
+      - id: PR-02
+        name: 查得标校验
+        legacy:
+          flowCode: PRICE_APPLY_CHECK
+          activities: []
+        target:
+          handler: PriceApplyCheckHandler
+          actions:
+            - CheckPriceConfigAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-03
+        name: 价格受理(保存价格)
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: PriceSaveHandler
+          actions:
+            - SavePriceInfoAction
+            - SaveNodePriceRelAction
+          context: pricing
+        priority: P0
+        status: not-started
+      - id: PR-04
+        name: 绑定计费产品套餐(新建)
+        legacy:
+          flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
+          activities:
+            - CreateProdComboActivity
+        target:
+          handler: StandardPriceSecondStageHandler
+          actions:
+            - CreateProdComboAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-05
+        name: 绑定计费产品套餐(复用已有)
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: PriceSaveHandler
+          actions:
+            - ReuseProdComboAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-06
+        name: 单产品计费配置
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: PriceApplyFirstStageHandler
+          actions:
+            - SaveSinglePriceAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-07
+        name: 多价格计费选一签约
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: SigningHandler
+          actions:
+            - SelectPriceForSignAction
+          context: signing
+        priority: P2
+        status: not-started
+      - id: PR-08
+        name: 套餐成员一起签约
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: SigningHandler
+          actions:
+            - BundleSignAction
+          context: signing
+        priority: P2
+        status: not-started
+      - id: PR-09
+        name: 提交价格申请审批
+        legacy:
+          flowCode: PRICE_APPLY_FIRST_STAGE
+          activities:
+            - PriceApplyActivity
+            - ProdOnlineUpdateActivity
+            - PriceSubmitProcessActivity
+            - UpdateDeliverRecordPriceStatusActivity
+        target:
+          handler: PriceApplyFirstStageHandler
+          actions:
+            - PriceApplyAction
+            - ProdOnlineUpdateAction
+            - PriceSubmitProcessAction
+            - UpdatePriceStatusAction
+          context: pricing
+        priority: P0
+        status: not-started
+      - id: PR-10
+        name: 标准价格审批通过
+        legacy:
+          flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
+          activities:
+            - CreateProdComboActivity
+            - CreateStandardPriceActivity
+        target:
+          handler: StandardPriceSecondStageHandler
+          actions:
+            - CreateProdComboAction
+            - CreateStandardPriceAction
+          context: pricing
+        priority: P0
+        status: not-started
+      - id: PR-11
+        name: 标准价格审批拒绝/撤销
+        legacy:
+          flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
+          activities:
+            - PriceProcessRejectActivity
+            - PriceProcessCancelActivity
+        target:
+          handler: StandardPriceSecondStageHandler
+          actions:
+            - PriceProcessRejectAction
+            - PriceProcessCancelAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-12
+        name: 个性化价格审批通过
+        legacy:
+          flowCode: PERSONALIZE_PRICE_APPLY_SECOND_STAGE
+          activities:
+            - CreateProdComboActivity
+            - CreatePersonalizePriceActivity
+            - UpdateDeliverRecordPriceStatusActivity
+        target:
+          handler: PersonalizePriceSecondStageHandler
+          actions:
+            - CreateProdComboAction
+            - CreatePersonalizePriceAction
+            - UpdatePriceStatusAction
+          context: pricing
+        priority: P0
+        status: not-started
+      - id: PR-13
+        name: 个性化价格审批拒绝/撤销
+        legacy:
+          flowCode: PERSONALIZE_PRICE_APPLY_SECOND_STAGE
+          activities:
+            - PriceProcessRejectActivity
+            - PriceProcessCancelActivity
+        target:
+          handler: PersonalizePriceSecondStageHandler
+          actions:
+            - PriceProcessRejectAction
+            - PriceProcessCancelAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-14
+        name: 历史补产品套餐审批通过
+        legacy:
+          flowCode: PROD_COMBO_HISTORY_PRICE_SUPPLEMENT_PD_SECOND_STAGE
+          activities:
+            - ProdCombHistoryPriceSupplementPdActivity
+        target:
+          handler: ProdComboHistorySupplementSecondStageHandler
+          actions:
+            - ProdComboHistorySupplementAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-15
+        name: 价格审批路由(内化到 route())
+        legacy:
+          flowCode: ""
+          activities:
+            - PriceProcessCallbackRouteActivity
+        target:
+          handler: ""
+          actions: []
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-16
+        name: 价格生效
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions:
+            - ActivatePriceAction
+          context: pricing
+        priority: P1
+        status: not-started
+      - id: PR-17
+        name: 计费选项查询
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: pricing
+        priority: P2
+        status: not-started
+      - id: PR-18
+        name: 价格管理查询
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: pricing
+        priority: P2
+        status: not-started
+  - id: signing
+    name: 签约
+    features:
+      - id: S-01
+        name: 触发线上签约
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: SigningHandler
+          actions:
+            - InitiateSignAction
+          context: signing
+        priority: P1
+        status: not-started
+      - id: S-02
+        name: 签约操作
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions:
+            - ProcessSignCallbackAction
+          context: signing
+        priority: P1
+        status: not-started
+      - id: S-03
+        name: 签约状态回调
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions:
+            - SyncSignStatusAction
+          context: signing
+        priority: P1
+        status: not-started
+  - id: ops
+    name: 运维
+    features:
+      - id: O-01
+        name: SOP基座(模板-实例能力,已废弃)
+        legacy:
+          flowCode: ""
+          activities: []
+        target:
+          handler: ""
+          actions: []
+          context: ""
+        priority: P2
+        status: not-started
+      - id: O-02
+        name: 操作可审计性留存(日志)
+        legacy:
+          flowCode: ""
+          activities:
+            - InstDeliverRecordPostHandleActivity
+        target:
+          handler: ""
+          actions:
+            - OperateLogAction
+          context: ""
+        priority: P2
+        status: not-started
