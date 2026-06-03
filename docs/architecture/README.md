@@ -88,9 +88,19 @@ Clarifier (W+C) → ★人审契约★ → Coder (W+C) → TestGen (W+C) → QA 
 
 ---
 
-## 与 HelmCode 现状的关系
+## 与 HelmCode 的关系
 
-**不重起仓库**,在现有 HelmCode 仓库内分层叠加。现有 `core/` `standards/` `commands/` `loader/` `install.mjs/sh` 全部保留,新增 `packages/` `apps/` `infra/` `docs/`。HelmCode v3 升级路径平滑,现有用户不破坏。
+**独立仓库**(本仓库 helmflow):helmflow 不与 HelmCode 同仓共建。理由:
+- HelmCode = 轻量"标准+模板+skill 安装器"(< 5MB,CLI 为主)
+- helmflow = 中台 web + agent + sandbox(几百 MB 依赖,生产服务为主)
+- 目标用户/技术栈/发版节奏均不同(同 vite/vitest、nest/nest-devtools 业界惯例)
+
+**复用 HelmCode 资产**:
+- MVP 阶段 `standards/` `references/` 直接复制(冗余但简单)
+- V1 抽 npm 包 `@helmcode/standards-java-ddd`,两边 import 同一份
+- HelmCode `core/{clarify,implement,verify,...}` skill 的 prompt 抽到本仓 `packages/agent-core/prompts/`
+
+HelmCode 继续按"轻量库"维护;helmflow 在上层叠加平台能力,各自独立发版。
 
 ---
 
@@ -107,7 +117,7 @@ Clarifier (W+C) → ★人审契约★ → Coder (W+C) → TestGen (W+C) → QA 
 | Q7 | MVP 范围 | 单项目(mycmdeliverhub) |
 | Q8 | 人介入策略 | MVP 严格 2 点 / V2 弱 feature auto-approve |
 | Q9 | 模型组合 | Worker Opus + Critic Haiku |
-| Q10 | 命名空间 | 在 HelmCode 仓库内(渐进式) |
+| Q10 | 命名空间 | **独立 helmflow 仓库**(已定,2026-06-03 拍板) |
 
 ---
 

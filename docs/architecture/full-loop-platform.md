@@ -573,27 +573,36 @@ domains:
 | Q7 | MVP 范围 | 单项目 / 多项目 | **单项目(mycmdeliverhub)验证** |
 | Q8 | 人介入策略 | 严格 2 点 / 可配置 / 全自动 | **MVP 严格 2 点,V2 P3 feature 可 auto-approve** |
 | Q9 | 模型组合 | 全 Opus / Mixed / 全 Haiku | **Mixed**:Worker Opus,Critic Haiku |
-| Q10 | 命名空间 | 在 HelmCode 仓库内 / 拆新仓库 | **在 HelmCode 仓库内**(渐进式叠加) |
+| Q10 | 命名空间 | 在 HelmCode 仓库内 / 拆新仓库 | **独立 helmflow 仓库**(2026-06-03 已拍板,见 §11) |
 
 ---
 
-## 11. 下一步具体动作
+## 11. 仓库与下一步
 
-按用户拍板情况,具体下一步分两条路:
+### 仓库决策(已落地)
 
-### 路径 A:先做协议层与矩阵抽取(2-3 天)
+| 决策 | 状态 |
+|---|---|
+| **helmflow 独立仓库**(本仓库) | ✅ 已建:https://github.com/wanlihang/helmflow |
+| HelmCode 保留为轻量库,继续维护 standards / skills / CLI | ✅ https://github.com/wanlihang/helmcode |
+| 复用方式:MVP 阶段直接复制 standards/references;V1 抽 `@helmcode/standards-*` npm 包 | MVP 已完成 |
 
-1. 我把"重构方案附录 C"5 域 40 功能点抽成 `mycmdeliverhub/.claude/matrix/feature-matrix.yaml`
-2. 写第一版 `mycmdeliverhub/helmcode.yaml`
-3. 再 review 协议(本目录 4 文档)
-4. 完了再启动 Phase 1 写代码
+### MVP 路径(已开跑)
 
-### 路径 B:直接启动 Phase 1 写代码
+- **Goal 1**: ✅ `apps/portal/` 矩阵静态渲染(已 commit + push,可 `cd apps/portal && pnpm install && pnpm dev` 在浏览器看)
+- **Goal 2**: ⏳ feature 详情页 + 启动需求 mock 对话框
+- **Goal 3**: ⏳ 真实 Anthropic Clarifier SSE streaming
 
-1. 在 HelmCode 仓库内 `pnpm init` + `pnpm-workspace.yaml`
-2. 创建 packages/contract-schema(Zod 全套)
-3. packages/agent-core 拆 5 角色基础架构
-4. apps/cli 加 `helmcode start <feature-id>` 命令(MVP 跑通无 web)
+详见 [`goal-chain-mvp.md`](./goal-chain-mvp.md)。
+
+### Phase 1 启动(Goal 3 后)
+
+1. helmflow 仓库根目录 `pnpm init` + `pnpm-workspace.yaml`(monorepo 化)
+2. 创建 `packages/contract-schema`(Zod 全套)
+3. `packages/agent-core` 拆 5 角色基础架构(Worker + Critic 独立调用)
+4. `apps/cli` 加 `helmflow start <feature-id>` 命令(终端跑通无 web)
+
+> 注意:中台 CLI 命令是 `helmflow xxx`(本仓库),HelmCode CLI 仍是 `helmcode xxx`(标准安装器)。两者职责清晰分离。
 
 **我推荐 A**:协议错了后面全要重写,先把协议跑通在 mycmdeliverhub 上验证,再投入 monorepo 骨架。
 

@@ -7,8 +7,8 @@
 ## 1. 顶层布局
 
 ```
-helmcode/                                    # 现有 HelmCode 仓库
-├── packages/                                # 共享 lib(纯 TS,无运行时)
+helmflow/                                    # 本仓库(独立于 HelmCode)
+├── packages/                                # 共享 lib(纯 TS,Phase 1 加)
 │   ├── agent-core/                          # Agent 编排核心(Worker + Critic 模式)
 │   ├── contract-schema/                     # 行为契约 / fix-task / reflection-log Zod schema
 │   ├── matrix-schema/                       # feature-matrix.yaml + helmcode.yaml schema
@@ -18,33 +18,30 @@ helmcode/                                    # 现有 HelmCode 仓库
 │   └── shared/                              # 工具函数 / 错误类型 / 日志
 │
 ├── apps/                                    # 可运行应用
-│   ├── portal/                              # Next.js 15 web UI(全景 + 单 feature 钻取)
-│   ├── orchestrator/                        # 后端编排服务(Next API routes 或独立 Hono)
-│   └── cli/                                 # helmcode CLI(沿用现有 bin/helmcode.mjs 升级)
+│   ├── portal/                              # ✅ Goal 1 已就位:Next.js 15 web UI(全景矩阵)
+│   ├── orchestrator/                        # Phase 1 加:后端编排服务(Next API routes 或独立 Hono)
+│   └── cli/                                 # Phase 1 加:helmflow CLI(`helmflow start <feature-id>`)
 │
-├── infra/                                   # 部署配置
+├── infra/                                   # 部署配置(Phase 2 加)
 │   ├── docker/                              # Dockerfile + docker-compose.yml
 │   ├── sandbox-images/                      # 预热的 sandbox 镜像 Dockerfile
 │   │   ├── java-ddd-sofa-21/
 │   │   └── node-express-20/
 │   └── migrations/                          # Drizzle migration 输出
 │
-├── core/                                    # 现有 HelmCode skills(保留,作为 agent-core 的 prompt 来源)
-│   ├── clarify/
-│   ├── implement/
-│   ├── verify/
-│   └── ...
-│
-├── standards/                               # 现有标准(保留)
+├── standards/                               # ✅ 已就位:从 HelmCode 复制(V1 抽 npm 包共享)
 │   └── java-ddd/
 │
+├── references/                              # ✅ 已就位:从 HelmCode 复制(error-codes / package-structure / antipatterns 等)
+│
 ├── docs/
-│   └── architecture/                        # 本目录:方案文档
+│   └── architecture/                        # ✅ 已就位:方案文档
 │       ├── README.md                        # 索引
 │       ├── full-loop-platform.md            # 总体架构
-│       ├── tech-stack-rationale.md          # 技术栈决策(本文档同级)
+│       ├── tech-stack-rationale.md          # 技术栈决策
 │       ├── repo-structure.md                # 本文件
-│       └── agent-protocol.md                # 节点协议
+│       ├── agent-protocol.md                # 节点协议
+│       └── goal-chain-mvp.md                # MVP /goal 指南
 │
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -237,7 +234,7 @@ packages/sandbox/
 ```typescript
 const sandbox = await createSandbox({
   type: 'docker',
-  image: 'helmcode/java-ddd-sofa-21:latest',
+  image: 'helmflow/java-ddd-sofa-21:latest',
   worktree: { repo: '/path/to/mycmdeliverhub', branch: 'feature/F-005' },
   caches: ['.m2', '.gradle'],
 });
@@ -408,16 +405,21 @@ apps/cli/
 
 ## 5. 包名命名
 
-所有内部 package 用 `@helmcode/` scope:
-- `@helmcode/agent-core`
-- `@helmcode/contract-schema`
-- `@helmcode/matrix-schema`
-- `@helmcode/adapter-core`
-- `@helmcode/sandbox`
-- `@helmcode/storage`
-- `@helmcode/shared`
+helmflow 内部 package 用 `@helmflow/` scope:
+- `@helmflow/agent-core`
+- `@helmflow/contract-schema`
+- `@helmflow/matrix-schema`
+- `@helmflow/adapter-core`
+- `@helmflow/sandbox`
+- `@helmflow/storage`
+- `@helmflow/shared`
 
-外部发布只发 `helmcode`(整体 CLI)和 `@helmcode/sdk`(给第三方插件用,V2)。
+HelmCode 抽出的共享 npm 包用 `@helmcode/` scope(V1 启动):
+- `@helmcode/standards-java-ddd` — Java DDD 标准 + patterns + review-rules
+- `@helmcode/standards-node-express` — V2 加
+- `@helmcode/references-mycm` — error-codes / package-structure 等
+
+外部发布只发 `helmflow`(中台 CLI / web 镜像)与 `@helmflow/sdk`(给第三方插件用,V2)。HelmCode 继续发 `helmcode`(标准安装器 CLI)。
 
 ---
 
@@ -474,30 +476,39 @@ packages:
 
 ---
 
-## 7. 与现有 HelmCode 仓库的关系
+## 7. 与 HelmCode 仓库的关系
 
-**不重起仓库**,在现有 HelmCode 仓库内分层叠加:
+**两个仓库职责完全分离**:
 
-| 现有目录 | 处理 |
-|---------|------|
-| `bin/helmcode.mjs` | 改为薄壳,delegate 到 `apps/cli` |
-| `install.mjs` / `install.sh` | 保留(现有用户),内部逐步迁移到 `apps/cli` |
-| `loader/`、`commands/`、`scripts/` | 保留,内部依赖关系不变 |
-| `core/{clarify,implement,verify,...}/` | **保留 prompt 内容**,被 `packages/agent-core/prompts/` 引用 |
-| `standards/java-ddd/` | 保留,被 `packages/adapter-core/adapters/java-ddd/` 引用 |
+| 仓库 | 角色 | 内容 |
+|---|---|---|
+| https://github.com/wanlihang/helmcode | 轻量"标准+模板+skill 安装器" | `bin/helmcode.mjs`、`install.mjs/sh`、`core/{clarify,implement,...}`、`standards/java-ddd`、`loader/`、`commands/`、`scripts/` |
+| https://github.com/wanlihang/helmflow(本仓库) | 中台 web + agent + sandbox | `apps/portal`、`packages/*`、`infra/*`、`docs/architecture/*` |
 
-**渐进式迁移**:packages/apps 先与现有 install.mjs/sh 共存;Phase 4 完成后再考虑废弃旧入口。
+**复用方式**:
+
+| HelmCode 资产 | helmflow 复用形式 | 阶段 |
+|---|---|---|
+| `standards/java-ddd/` | 直接复制到 helmflow `standards/` | MVP(已完成) |
+| `core/init-java-ddd/references/*.md`(error-codes / package-structure / antipatterns / sequence-gotchas / sofa-starter-index) | 直接复制到 helmflow `references/` | MVP(已完成) |
+| `core/{clarify,implement,verify,...}/SKILL.md` prompt | 抽到 `packages/agent-core/prompts/*.system.md`(手动同步 / V1 抽 npm 包) | Phase 1 |
+| `core/init-java-ddd/templates/*` 模板 | 不直接复用;helmflow 通过 adapter 调用项目的本地资源 | — |
+
+**V1 升级路径**:把 `standards-java-ddd` 抽出来发 `@helmcode/standards-java-ddd` npm 包,helmcode 与 helmflow 都 `import` 同一份,避免冗余维护。MVP 阶段复制版可接受。
+
+**CLI 命名空间不冲突**:HelmCode CLI 仍是 `helmcode xxx`(install / status / update);helmflow CLI 是 `helmflow xxx`(start / orchestrate / matrix)。
 
 ---
 
 ## 8. 仓库初始化命令清单(Phase 0 末尾)
 
 ```bash
-# 在 HelmCode 仓库根目录
+# 在 helmflow 仓库根目录(本仓库),Phase 1 启动时跑
 pnpm init -y                                  # 升级 root package.json
 echo 'packages:\n  - "packages/*"\n  - "apps/*"' > pnpm-workspace.yaml
 pnpm add -D -w turbo typescript @biomejs/biome vitest
-pnpm dlx create-next-app@latest apps/portal --typescript --tailwind --app
+
+# apps/portal/ 已就位(Goal 1 产出),不必再 create-next-app
 
 # 各 package 初始化
 for pkg in agent-core contract-schema matrix-schema adapter-core sandbox storage shared; do
