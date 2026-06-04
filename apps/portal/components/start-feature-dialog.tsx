@@ -44,12 +44,30 @@ INIT → IN_PROGRESS → DONE
 `;
 }
 
+type SseEvent =
+  | { type: "token"; text: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+function parseSseLine(line: string): SseEvent | null {
+  if (!line.startsWith("data: ")) return null;
+  const payload = line.slice(6).trim();
+  if (payload.length === 0) return null;
+  try {
+    return JSON.parse(payload) as SseEvent;
+  } catch {
+    return null;
+  }
+}
+
 export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
   const [open, setOpen] = useState(false);
   const [userRequest, setUserRequest] = useState("");
   const [clarifying, setClarifying] = useState(false);
   const [clarifierOutput, setClarifierOutput] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const clearTimer = () => {
     if (intervalRef.current !== null) {
@@ -58,9 +76,17 @@ export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
     }
   };
 
+  const abortStream = () => {
+    if (abortRef.current !== null) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  };
+
   useEffect(() => {
     return () => {
       clearTimer();
+      abortStream();
     };
   }, []);
 
@@ -68,15 +94,19 @@ export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
     setOpen(next);
     if (!next) {
       clearTimer();
+      abortStream();
       setUserRequest("");
       setClarifying(false);
       setClarifierOutput("");
+      setErrorMessage(null);
     }
   };
 
   const runMock = () => {
     clearTimer();
+    abortStream();
     const text = buildMockMarkdown(feature, userRequest);
+    setErrorMessage(null);
     setClarifying(true);
     setClarifierOutput("");
     let index = 0;
@@ -92,6 +122,82 @@ export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
     }, 100);
   };
 
+  const runReal = async () => {
+    clearTimer();
+    abortStream();
+    setErrorMessage(null);
+    setClarifying(true);
+    setClarifierOutput("");
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ featureId: feature.id, userRequest }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const json = (await res.json()) as { error?: string };
+          if (json.error) detail = `${detail} — ${json.error}`;
+        } catch {
+          // ignore
+        }
+        throw new Error(detail);
+      }
+      if (!res.body) {
+        throw new Error("响应体为空,无法读取 SSE 流");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let aggregated = "";
+      let finished = false;
+
+      while (!finished) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let nlIdx = buffer.indexOf("\n");
+        while (nlIdx >= 0) {
+          const line = buffer.slice(0, nlIdx).replace(/\r$/, "");
+          buffer = buffer.slice(nlIdx + 1);
+          nlIdx = buffer.indexOf("\n");
+
+          const ev = parseSseLine(line);
+          if (!ev) continue;
+
+          if (ev.type === "token") {
+            aggregated += ev.text;
+            setClarifierOutput(aggregated);
+          } else if (ev.type === "done") {
+            finished = true;
+            break;
+          } else if (ev.type === "error") {
+            throw new Error(ev.message);
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // user closed dialog; swallow
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setErrorMessage(message);
+      }
+    } finally {
+      abortRef.current = null;
+      setClarifying(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
@@ -104,7 +210,8 @@ export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
           </DialogTitle>
           <DialogDescription>
             描述需求,然后运行 Clarifier 生成 Problem / State Machine / Business Rules /
-            Acceptance Criteria / API Contract。当前为 Mock 流式输出,真实 LLM 在 Goal 3 接通。
+            Acceptance Criteria / API Contract / Domain Model。
+            真实模式调 Anthropic Claude,Mock 模式用于离线演示。
           </DialogDescription>
         </DialogHeader>
 
@@ -120,11 +227,21 @@ export function StartFeatureDialog({ feature }: StartFeatureDialogProps) {
             placeholder={`例如:为 ${feature.name} 增加 XX 行为,需考虑 YY 边界条件...`}
             rows={4}
           />
-          <div>
-            <Button onClick={runMock} disabled={clarifying} variant="default">
-              {clarifying ? "Clarifier 运行中..." : "运行 Clarifier(Mock)"}
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={runReal} disabled={clarifying} variant="default">
+              {clarifying ? "Clarifier 运行中..." : "运行 Clarifier(真实)"}
+            </Button>
+            <Button onClick={runMock} disabled={clarifying} variant="outline">
+              运行 Clarifier(Mock)
             </Button>
           </div>
+
+          {errorMessage && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <div className="font-semibold">Clarifier 调用失败</div>
+              <div className="mt-1 font-mono break-words">{errorMessage}</div>
+            </div>
+          )}
 
           {clarifierOutput && (
             <div className="space-y-1">
