@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- outer ring -->
+  <circle cx="16" cy="16" r="13" stroke="#1e293b" stroke-width="2.5" fill="none"/>
+  <!-- inner hub -->
+  <circle cx="16" cy="16" r="3.5" fill="#1e293b"/>
+  <!-- spokes (6 directions like a ship's wheel) -->
+  <line x1="16" y1="12.5" x2="16" y2="3" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <line x1="16" y1="19.5" x2="16" y2="29" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <line x1="12.97" y1="14.25" x2="4.73" y2="9.5" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <line x1="19.03" y1="17.75" x2="27.27" y2="22.5" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <line x1="12.97" y1="17.75" x2="4.73" y2="22.5" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <line x1="19.03" y1="14.25" x2="27.27" y2="9.5" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+  <!-- spoke handles (knobs) -->
+  <circle cx="16" cy="3" r="1.5" fill="#3b82f6"/>
+  <circle cx="16" cy="29" r="1.5" fill="#3b82f6"/>
+  <circle cx="4.73" cy="9.5" r="1.5" fill="#3b82f6"/>
+  <circle cx="27.27" cy="22.5" r="1.5" fill="#3b82f6"/>
+  <circle cx="4.73" cy="22.5" r="1.5" fill="#3b82f6"/>
+  <circle cx="27.27" cy="9.5" r="1.5" fill="#3b82f6"/>
+</svg>

@@ -1,5 +1,5 @@
 {
-  "name": "@helmcode/portal",
+  "name": "@helmflow/portal",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,6 +12,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@helmflow/contract-schema": "workspace:*",
+    "@helmflow/agent-core": "workspace:*",
+    "@helmflow/agent-runner": "workspace:*",
+    "@helmflow/storage": "workspace:*",
+    "@helmflow/orchestrator": "workspace:*",
+    "@helmflow/sandbox-worktree": "workspace:*",
+    "@helmflow/manifest-loader": "workspace:*",
     "next": "15.1.6",
     "react": "19.0.0",
     "react-dom": "19.0.0",
@@ -20,8 +27,7 @@
     "tailwind-merge": "2.6.0",
     "lucide-react": "0.469.0",
     "@radix-ui/react-dialog": "1.1.4",
-    "@radix-ui/react-slot": "1.1.1",
-    "@anthropic-ai/sdk": "0.39.0"
+    "@radix-ui/react-slot": "1.1.1"
   },
   "devDependencies": {
     "@types/node": "22.10.5",

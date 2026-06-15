@@ -35,6 +35,8 @@ const config: Config = {
           clarifying: "hsl(45 93% 58%)",
           pendingGoal: "hsl(142 71% 45%)",
           implementing: "hsl(217 91% 60%)",
+          testsPending: "hsl(280 67% 55%)",
+          qaPassed: "hsl(170 76% 40%)",
           done: "hsl(142 76% 36%)",
           blocked: "hsl(0 84% 60%)",
           abandoned: "hsl(220 9% 46%)",

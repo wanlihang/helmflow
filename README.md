@@ -70,7 +70,7 @@ pnpm dev
 helmflow/
 ├── apps/portal/              # Next.js 15 web UI(本期 MVP)
 ├── docs/architecture/        # 设计文档(5 份)
-├── standards/java-ddd/       # 编码标准(从 helmcode 复制,V1 拆 npm 包共享)
+├── standards/java-ddd/       # 编码标准(从 HelmCode 复制,V1 拆 npm 包共享)
 ├── references/               # 项目参考(error-codes / package-structure / 等)
 └── (future)
     ├── packages/             # @helmflow/agent-core / sandbox / adapter-core / ...

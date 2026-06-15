@@ -1,6 +1,6 @@
 project: mycmdeliverhub
-description: 交付中枢平台 — 5 域 40 功能点
-schemaVersion: 1
+description: 交付中枢平台 — 5 域 34 功能点
+schemaVersion: 2
 domains:
   - id: deliver
     name: 交付管理
@@ -25,7 +25,13 @@ domains:
             - PushFlowNodeAction
           context: deliver
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-02
         name: 识别客户类型
         legacy:
@@ -36,7 +42,13 @@ domains:
           actions: []
           context: deliver
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-03
         name: 判定签约模式
         legacy:
@@ -47,9 +59,15 @@ domains:
           actions: []
           context: deliver
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-04
-        name: 创建关联交付需求(已废弃)
+        name: 创建关联交付需求
         legacy:
           flowCode: CREATE_RELATE_DELIVER_RECORD_FLOW
           activities:
@@ -61,9 +79,15 @@ domains:
           actions: []
           context: deliver
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 废弃
+            note: 业务已下线
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-05
-        name: 交付记录前进到下一阶段
+        name: 前进
         legacy:
           flowCode: PIPELINE_FORWARD_DELIVER_RECORD
           activities:
@@ -78,9 +102,15 @@ domains:
             - PushFlowNodeAction
           context: deliver
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-06
-        name: 交付记录回退到上一阶段
+        name: 回退
         legacy:
           flowCode: PIPELINE_BACK_DELIVER_RECORD
           activities:
@@ -99,9 +129,15 @@ domains:
             - BackFlowNodeAction
           context: deliver
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-07
-        name: 交付记录删除
+        name: 删除
         legacy:
           flowCode: DELETE_DELIVER_RECORD_FLOW
           activities:
@@ -116,9 +152,15 @@ domains:
             - DeleteDeliverTaskAction
           context: deliver
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-08
-        name: 交付需求详情查询
+        name: 详情查询
         legacy:
           flowCode: ""
           activities: []
@@ -127,9 +169,15 @@ domains:
           actions: []
           context: deliver
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: D-09
-        name: 交付需求列表分页查询
+        name: 列表查询
         legacy:
           flowCode: ""
           activities: []
@@ -138,27 +186,18 @@ domains:
           actions: []
           context: deliver
         priority: P2
-        status: not-started
-      - id: D-10
-        name: SOP流程实例创建
-        legacy:
-          flowCode: DELIVER_FLOW_INSTANCE_CREATE_FLOW
-          activities:
-            - DeliverFlowTempCreateActivity
-            - DeliverFlowTempPersistenceActivity
-        target:
-          handler: DeliverFlowInstanceCreateHandler
-          actions:
-            - DeliverFlowTempCreateAction
-            - DeliverFlowTempPersistenceAction
-          context: deliver
-        priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
   - id: mapping
     name: 产品映射
     features:
       - id: P-01
-        name: 保存产品映射
+        name: 保存映射
         legacy:
           flowCode: PRODUCT_MAPPING_FIRST_STAGE
           activities:
@@ -169,9 +208,15 @@ domains:
             - SavePdMappingAction
           context: mapping
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-02
-        name: 提交产品映射审批
+        name: 提交审批
         legacy:
           flowCode: PRODUCT_MAPPING_FIRST_STAGE
           activities:
@@ -182,9 +227,15 @@ domains:
             - SubmitMappingProcessAction
           context: mapping
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-03
-        name: 产品映射审批通过处理
+        name: 审批通过
         legacy:
           flowCode: PRODUCT_MAPPING_SECOND_STAGE
           activities:
@@ -206,9 +257,15 @@ domains:
             - TriggerQtAutoSignAction
           context: mapping
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-04
-        name: 产品映射审批拒绝/撤回
+        name: 审批拒绝
         legacy:
           flowCode: PRODUCT_MAPPING_SECOND_STAGE
           activities:
@@ -221,19 +278,30 @@ domains:
             - PdMappingCancelAction
           context: mapping
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-05
-        name: 审批路由(内化到 route())
+        name: 构建产品树
         legacy:
-          flowCode: PRODUCT_MAPPING_SECOND_STAGE
-          activities:
-            - PdMappingProcessCallbackRouteActivity
+          flowCode: ""
+          activities: []
         target:
-          handler: ProductMappingSecondStageHandler
+          handler: ""
           actions: []
           context: mapping
-        priority: P1
-        status: not-started
+        priority: P2
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-06
         name: 产品树查询
         legacy:
@@ -244,9 +312,15 @@ domains:
           actions: []
           context: mapping
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: P-07
-        name: 触发钱塘自研产品签约
+        name: 触发自研签约
         legacy:
           flowCode: QT_FUSION_AUTO_SIGN_FLOW
           activities:
@@ -259,12 +333,18 @@ domains:
             - QtFusionProdOnlineUpdateAction
           context: signing
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
   - id: pricing
     name: 价格配置
     features:
       - id: PR-01
-        name: 价格预校验
+        name: 预校验
         legacy:
           flowCode: PRICE_APPLY_CHECK
           activities:
@@ -275,9 +355,15 @@ domains:
             - CheckPriceConfigAction
           context: pricing
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-02
-        name: 查得标校验
+        name: 查得标
         legacy:
           flowCode: PRICE_APPLY_CHECK
           activities: []
@@ -287,9 +373,15 @@ domains:
             - CheckPriceConfigAction
           context: pricing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-03
-        name: 价格受理(保存价格)
+        name: 价格受理
         legacy:
           flowCode: ""
           activities: []
@@ -300,9 +392,15 @@ domains:
             - SaveNodePriceRelAction
           context: pricing
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-04
-        name: 绑定计费产品套餐(新建)
+        name: 套餐新建
         legacy:
           flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
           activities:
@@ -313,9 +411,15 @@ domains:
             - CreateProdComboAction
           context: pricing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-05
-        name: 绑定计费产品套餐(复用已有)
+        name: 套餐复用
         legacy:
           flowCode: ""
           activities: []
@@ -325,9 +429,15 @@ domains:
             - ReuseProdComboAction
           context: pricing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-06
-        name: 单产品计费配置
+        name: 单产品计费
         legacy:
           flowCode: ""
           activities: []
@@ -337,9 +447,15 @@ domains:
             - SaveSinglePriceAction
           context: pricing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-07
-        name: 多价格计费选一签约
+        name: 多价格选一
         legacy:
           flowCode: ""
           activities: []
@@ -349,9 +465,15 @@ domains:
             - SelectPriceForSignAction
           context: signing
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-08
-        name: 套餐成员一起签约
+        name: 套餐成员签约
         legacy:
           flowCode: ""
           activities: []
@@ -361,9 +483,15 @@ domains:
             - BundleSignAction
           context: signing
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-09
-        name: 提交价格申请审批
+        name: 提交审批
         legacy:
           flowCode: PRICE_APPLY_FIRST_STAGE
           activities:
@@ -380,9 +508,15 @@ domains:
             - UpdatePriceStatusAction
           context: pricing
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-10
-        name: 标准价格审批通过
+        name: 审批结果
         legacy:
           flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
           activities:
@@ -395,80 +529,14 @@ domains:
             - CreateStandardPriceAction
           context: pricing
         priority: P0
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: PR-11
-        name: 标准价格审批拒绝/撤销
-        legacy:
-          flowCode: STANDARD_PRICE_APPLY_SECOND_STAGE
-          activities:
-            - PriceProcessRejectActivity
-            - PriceProcessCancelActivity
-        target:
-          handler: StandardPriceSecondStageHandler
-          actions:
-            - PriceProcessRejectAction
-            - PriceProcessCancelAction
-          context: pricing
-        priority: P1
-        status: not-started
-      - id: PR-12
-        name: 个性化价格审批通过
-        legacy:
-          flowCode: PERSONALIZE_PRICE_APPLY_SECOND_STAGE
-          activities:
-            - CreateProdComboActivity
-            - CreatePersonalizePriceActivity
-            - UpdateDeliverRecordPriceStatusActivity
-        target:
-          handler: PersonalizePriceSecondStageHandler
-          actions:
-            - CreateProdComboAction
-            - CreatePersonalizePriceAction
-            - UpdatePriceStatusAction
-          context: pricing
-        priority: P0
-        status: not-started
-      - id: PR-13
-        name: 个性化价格审批拒绝/撤销
-        legacy:
-          flowCode: PERSONALIZE_PRICE_APPLY_SECOND_STAGE
-          activities:
-            - PriceProcessRejectActivity
-            - PriceProcessCancelActivity
-        target:
-          handler: PersonalizePriceSecondStageHandler
-          actions:
-            - PriceProcessRejectAction
-            - PriceProcessCancelAction
-          context: pricing
-        priority: P1
-        status: not-started
-      - id: PR-14
-        name: 历史补产品套餐审批通过
-        legacy:
-          flowCode: PROD_COMBO_HISTORY_PRICE_SUPPLEMENT_PD_SECOND_STAGE
-          activities:
-            - ProdCombHistoryPriceSupplementPdActivity
-        target:
-          handler: ProdComboHistorySupplementSecondStageHandler
-          actions:
-            - ProdComboHistorySupplementAction
-          context: pricing
-        priority: P1
-        status: not-started
-      - id: PR-15
-        name: 价格审批路由(内化到 route())
-        legacy:
-          flowCode: ""
-          activities:
-            - PriceProcessCallbackRouteActivity
-        target:
-          handler: ""
-          actions: []
-          context: pricing
-        priority: P1
-        status: not-started
-      - id: PR-16
         name: 价格生效
         legacy:
           flowCode: ""
@@ -479,9 +547,15 @@ domains:
             - ActivatePriceAction
           context: pricing
         priority: P1
-        status: not-started
-      - id: PR-17
-        name: 计费选项查询
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
+      - id: PR-12
+        name: 计费查询
         legacy:
           flowCode: ""
           activities: []
@@ -490,8 +564,14 @@ domains:
           actions: []
           context: pricing
         priority: P2
-        status: not-started
-      - id: PR-18
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
+      - id: PR-13
         name: 价格管理查询
         legacy:
           flowCode: ""
@@ -501,12 +581,18 @@ domains:
           actions: []
           context: pricing
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 待实现
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
   - id: signing
     name: 签约
     features:
       - id: S-01
-        name: 触发线上签约
+        name: 触发签约
         legacy:
           flowCode: ""
           activities: []
@@ -516,7 +602,13 @@ domains:
             - InitiateSignAction
           context: signing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: S-02
         name: 签约操作
         legacy:
@@ -528,9 +620,15 @@ domains:
             - ProcessSignCallbackAction
           context: signing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: S-03
-        name: 签约状态回调
+        name: 签约回调
         legacy:
           flowCode: ""
           activities: []
@@ -540,12 +638,18 @@ domains:
             - SyncSignStatusAction
           context: signing
         priority: P1
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 需改造
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""
   - id: ops
     name: 运维
     features:
       - id: O-01
-        name: SOP基座(模板-实例能力,已废弃)
+        name: SOP基座
         legacy:
           flowCode: ""
           activities: []
@@ -554,9 +658,15 @@ domains:
           actions: []
           context: ""
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 废弃
+            note: 能力已内化到交付管理流程
+          - name: 测试签约
+            status: 待实现
+            note: ""
       - id: O-02
-        name: 操作可审计性留存(日志)
+        name: 审计日志
         legacy:
           flowCode: ""
           activities:
@@ -567,4 +677,10 @@ domains:
             - OperateLogAction
           context: ""
         priority: P2
-        status: not-started
+        scenarios:
+          - name: 正式签约
+            status: 已支持
+            note: ""
+          - name: 测试签约
+            status: 待实现
+            note: ""

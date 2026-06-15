@@ -70,4 +70,4 @@ curl -X POST http://localhost:3000/api/clarify \
 ## 技术栈
 
 Next.js 15 (App Router) · React 19 · Tailwind 3.4 · TypeScript strict ·
-`@anthropic-ai/sdk` 0.39.0 · `@radix-ui/react-dialog`
+`@anthropic-ai/claude-agent-sdk` 0.3.x(via `@helmflow/agent-runner`) · `@radix-ui/react-dialog`

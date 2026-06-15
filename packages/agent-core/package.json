@@ -1,0 +1,32 @@
+{
+  "name": "@helmflow/agent-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./critics": {
+      "types": "./src/critics/index.ts",
+      "default": "./src/critics/index.ts"
+    }
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@helmflow/contract-schema": "workspace:*",
+    "@helmflow/adapter-core": "workspace:*",
+    "yaml": "2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "typescript": "5.7.3"
+  }
+}

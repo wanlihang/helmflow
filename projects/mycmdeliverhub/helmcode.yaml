@@ -1,0 +1,7 @@
+name: mycmdeliverhub
+sandboxPath: /Users/wanlihang/IdeaProjects/mycmdeliverhub
+adapterType: java-ddd
+standardsRoot: ./standards/java-ddd/patterns
+featureMatrixPath: ./apps/portal/data/feature-matrix.yaml
+helmcode:
+  path: ../helmcode

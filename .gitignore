@@ -38,6 +38,19 @@ coverage/
 .helmflow/sandbox/
 .helmflow/runs/
 
+# Git worktrees (Goal 11 — per-feature isolation)
+worktrees/
+
+# HelmFlow Portal 本地数据(Goal 4 引入 SQLite + clarifier 输出)
+apps/portal/data/helmflow.db
+apps/portal/data/helmflow.db-journal
+apps/portal/data/helmflow.db-wal
+apps/portal/data/helmflow.db-shm
+apps/portal/data/runs/
+apps/portal/data/qa-reports/
+apps/portal/data/test-ac-mappings/
+apps/portal/data/contracts/
+
 # Claude Code 本地 dogfood 产物
 .claude/
 CLAUDE.md

@@ -1,0 +1,16 @@
+{
+  "name": "helmflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HelmFlow — Full-Loop AI Coding Platform monorepo (apps + packages)",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @helmflow/portal dev"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@11.5.1"
+}
