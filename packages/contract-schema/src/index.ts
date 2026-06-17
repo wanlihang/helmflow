@@ -1,15 +1,16 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// 对应 docs/architecture/agent-protocol.md §2.1 Clarifier 节点产出的 Contract
-// frontmatter:featureId / status / project / createdAt / domain / matrixCellId
-// 章节(markdown):problemDefinition / stateMachine / businessRules /
-//   acceptanceCriteria / apiContract / domainModel
+// Contract — HelmCode 中文 9 章节格式(控制平面回归第二刀对齐 helmcode clarify skill)
+// 业务元从引用块提取:`> - Feature ID:` / `> - 涉及领域:` / `> - 状态:` / `> - matrixCellId:`(HelmFlow 专属)
+// 章节:问题定义/状态机/业务规则/API契约/领域模型(+ 可选 Schema变更/兼容性约束/AC-测试映射)
+// parseContract 支持中英文双语 headings(兼容历史英文产出)。
 // ---------------------------------------------------------------------------
 
 export const ContractStatus = z.enum([
   "draft",
   "approved",
+  "goal-running",
   "done",
   "blocked",
   "abandoned",
@@ -35,27 +36,42 @@ export const ApiContractEntrySchema = z.object({
 });
 export type ApiContractEntry = z.infer<typeof ApiContractEntrySchema>;
 
+// AC-测试映射表一行:AC | 测试类 | 测试方法 | 断言类型
+export const AcTestMappingRowSchema = z.object({
+  acId: z.string().regex(/^AC-\d{3}$/),
+  testClass: z.string().min(1),
+  testMethod: z.string().min(1),
+});
+export type AcTestMappingRow = z.infer<typeof AcTestMappingRowSchema>;
+
+// ---------------------------------------------------------------------------
+// ContractSchema — HelmCode 中文 9 章节格式(控制平面回归第二刀对齐)
+// 业务元从引用块 `> - Feature ID:` / `> - 涉及领域:` / `> - 状态:` / `> - matrixCellId:` 提取
+// (与 HelmCode core/clarify/references/contract-template.md 一致;matrixCellId 为 HelmFlow 专属)
+// ---------------------------------------------------------------------------
 export const ContractSchema = z.object({
-  // frontmatter
+  // 引用块业务元
   featureId: z.string().min(1),
   status: ContractStatus,
-  project: z.string().min(1),
-  createdAt: z.string().min(1),
   domain: z.string().min(1),
-  matrixCellId: z.string().min(1),
-  // markdown 章节
+  matrixCellId: z.string().optional().default(""),
+  priority: z.string().optional().default(""),
+  // markdown 章节(中文 9 章节)
   problemDefinition: z.string().min(1),
-  stateMachine: z.string().min(1),
+  stateMachine: z.string(),
   businessRules: z.array(BusinessRuleSchema).min(1),
   acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(3),
-  apiContract: z.array(ApiContractEntrySchema).min(1),
-  domainModel: z.string().min(1),
+  apiContract: z.array(ApiContractEntrySchema),
+  domainModel: z.string(),
+  schemaChanges: z.string().optional().default(""),
+  compatibilityConstraints: z.string().optional().default(""),
+  acTestMapping: z.array(AcTestMappingRowSchema).optional().default([]),
 });
 export type Contract = z.infer<typeof ContractSchema>;
 
 // ---------------------------------------------------------------------------
-// parseContract — 把 markdown 字符串解析成 Contract 候选对象,再经 zod 校验。
-//   入参:含 yaml frontmatter (---) + 二级章节 (## ...) 的 markdown
+// parseContract — 把 HelmCode 中文格式 markdown 解析成 Contract 候选,再经 zod 校验。
+//   业务元来自引用块(> - key: value);章节按 `## 标题` 切分(语言无关)。
 //   返回:{ ok: true, data } 或 { ok: false, errors: string[] }
 // ---------------------------------------------------------------------------
 
@@ -63,50 +79,35 @@ export type ParseResult =
   | { ok: true; data: Contract }
   | { ok: false; errors: string[] };
 
-const REQUIRED_HEADINGS = [
-  "Problem Definition",
-  "State Machine",
-  "Business Rules",
-  "Acceptance Criteria",
-  "API Contract",
-  "Domain Model",
-] as const;
+// 必需章节(规范名)+ 别名。支持中文(HelmCode 标准)与英文(历史产出)双向兼容,
+// 避免 LLM 产出语言漂移导致 parseContract 失败 → critic 跑不到 → 契约 blocked。
+const HEADING_ALIASES: Record<string, string[]> = {
+  "问题定义": ["问题定义", "Problem Definition"],
+  "状态机": ["状态机", "State Machine"],
+  "业务规则": ["业务规则", "Business Rules"],
+  "API契约": ["API契约", "API 契约", "API Contract"],
+  "领域模型": ["领域模型", "Domain Model"],
+};
+const OPTIONAL_HEADINGS: Record<string, string[]> = {
+  "Schema变更": ["Schema变更", "Schema 变更", "Schema Changes"],
+  "兼容性约束": ["兼容性约束", "Compatibility Constraints"],
+  "AC-测试映射": ["AC-测试映射", "AC-测试映射表", "AC-Test Mapping"],
+};
 
-interface RawFrontmatter {
-  featureId?: string;
-  status?: string;
-  project?: string;
-  createdAt?: string;
-  domain?: string;
-  matrixCellId?: string;
-  [k: string]: unknown;
-}
-
-function splitFrontmatter(md: string): { fm: string | null; body: string } {
-  const m = md.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!m) return { fm: null, body: md };
-  return { fm: m[1] ?? "", body: m[2] ?? "" };
-}
-
-function parseFrontmatter(fm: string): RawFrontmatter {
-  // 极简 yaml 解析:仅支持 `key: value` 平铺,够 frontmatter 用
-  const out: RawFrontmatter = {};
-  for (const raw of fm.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const idx = line.indexOf(":");
-    if (idx < 0) continue;
-    const key = line.slice(0, idx).trim();
-    let val = line.slice(idx + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    out[key] = val;
+function getSection(sections: Map<string, string>, aliases: string[]): string {
+  for (const a of aliases) {
+    const v = sections.get(a);
+    if (v !== undefined) return v;
   }
-  return out;
+  return "";
+}
+
+// 从 markdown 引用块提取 `> - key: value`。宽松匹配(中英文 key、全角/半角冒号)。
+function extractQuoteField(md: string, key: string): string | null {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^>\\s*-?\\s*${escaped}\\s*[:：]\\s*(.+?)\\s*$`, "im");
+  const m = md.match(re);
+  return m && m[1] ? m[1].trim() : null;
 }
 
 function splitSections(body: string): Map<string, string> {
@@ -131,20 +132,26 @@ function splitSections(body: string): Map<string, string> {
   return sections;
 }
 
+/**
+ * 提取 BR/AC 列表。兼容:
+ *   - `- BR-001: 描述`(老格式)
+ *   - `- [ ] AC-001: 描述 — 验证方式: 测试 — 优先级: P0`(HelmCode checkbox 格式,
+ *     截断到首个 ` — ` 或 ` -- ` 分隔符前作为 text,避免验证方式/优先级污染)
+ */
 function extractIdList(
   block: string,
   prefix: "BR" | "AC",
 ): { id: string; text: string }[] {
   const items: { id: string; text: string }[] = [];
-  // 接受 `- BR-001: 描述` 与 `- BR-001 描述` 两种格式 — 冒号(ASCII 或全角)可选,
-  // ID 与描述之间至少 1 个分隔符(冒号 / 空白)。
   const re = new RegExp(
-    `^[\\-\\*]\\s*(${prefix}-\\d{3})[\\s::]+(.+)$`,
+    `^[\\-\\*]\\s*(?:\\[[ xX]\\]\\s*)?(${prefix}-\\d{3})[\\s::：]+(.+)$`,
   );
   for (const raw of block.split(/\r?\n/)) {
     const m = raw.trim().match(re);
     if (m && m[1] !== undefined && m[2] !== undefined) {
-      items.push({ id: m[1], text: m[2].trim() });
+      // 截断 AC 的 ` — 验证方式: ... — 优先级: ...` 尾部
+      const text = m[2].split(/\s+[—–-]+\s/)[0]!.trim();
+      items.push({ id: m[1], text });
     }
   }
   return items;
@@ -160,7 +167,7 @@ function parseApiTable(block: string): ApiContractEntry[] {
       .slice(1, -1)
       .map((c) => c.trim());
     if (cells.length < 3) continue;
-    if (cells[0] === "Method" || /^[-:\s]+$/.test(cells[0] ?? "")) continue;
+    if (cells[0] === "Method" || cells[0] === "方法" || /^[-:\s]+$/.test(cells[0] ?? "")) continue;
     const [method, request, response] = cells;
     if (
       method !== undefined &&
@@ -176,15 +183,32 @@ function parseApiTable(block: string): ApiContractEntry[] {
   return rows;
 }
 
-export function parseContract(md: string): ParseResult {
-  const { fm, body } = splitFrontmatter(md);
-  if (fm === null) {
-    return { ok: false, errors: ["缺少 yaml frontmatter (--- ... ---)"] };
+/** 解析 AC-测试映射表(`| AC | 测试类 | 测试方法/case | 断言类型 |`) */
+function parseAcTestMappingTable(block: string): AcTestMappingRow[] {
+  const rows: AcTestMappingRow[] = [];
+  for (const raw of block.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.startsWith("|")) continue;
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length < 3) continue;
+    const first = cells[0] ?? "";
+    if (!/^AC-\d{3}$/.test(first)) continue; // 跳过表头/分隔行
+    rows.push({
+      acId: first,
+      testClass: cells[1] ?? "",
+      testMethod: cells[2] ?? "",
+    });
   }
-  const frontmatter = parseFrontmatter(fm);
-  const sections = splitSections(body);
+  return rows;
+}
 
-  const missing = REQUIRED_HEADINGS.filter((h) => !sections.has(h));
+export function parseContract(md: string): ParseResult {
+  const sections = splitSections(md);
+
+  // 必需章节检测(中英文别名任一命中即可)
+  const missing = Object.entries(HEADING_ALIASES)
+    .filter(([, aliases]) => !aliases.some((a) => sections.has(a)))
+    .map(([canonical]) => canonical);
   if (missing.length > 0) {
     return {
       ok: false,
@@ -192,22 +216,36 @@ export function parseContract(md: string): ParseResult {
     };
   }
 
+  // 业务元从引用块提取(featureId 兜底从 `# Feature:` 标题)
+  let featureId =
+    extractQuoteField(md, "Feature ID") ??
+    extractQuoteField(md, "Feature Id") ??
+    "";
+  if (!featureId) {
+    const titleM = md.match(/^#\s+Feature:\s*(\S+)\s*$/m);
+    featureId = titleM && titleM[1] ? titleM[1] : "";
+  }
+  const status = extractQuoteField(md, "状态") ?? extractQuoteField(md, "Status");
+  const domain =
+    extractQuoteField(md, "涉及领域") ?? extractQuoteField(md, "领域") ?? "";
+  const matrixCellId = extractQuoteField(md, "matrixCellId") ?? "";
+  const priority = extractQuoteField(md, "优先级") ?? "";
+
   const candidate: Record<string, unknown> = {
-    featureId: frontmatter.featureId,
-    status: frontmatter.status,
-    project: frontmatter.project,
-    createdAt: frontmatter.createdAt,
-    domain: frontmatter.domain,
-    matrixCellId: frontmatter.matrixCellId,
-    problemDefinition: sections.get("Problem Definition") ?? "",
-    stateMachine: sections.get("State Machine") ?? "",
-    businessRules: extractIdList(sections.get("Business Rules") ?? "", "BR"),
-    acceptanceCriteria: extractIdList(
-      sections.get("Acceptance Criteria") ?? "",
-      "AC",
-    ),
-    apiContract: parseApiTable(sections.get("API Contract") ?? ""),
-    domainModel: sections.get("Domain Model") ?? "",
+    featureId,
+    status,
+    domain,
+    matrixCellId,
+    priority,
+    problemDefinition: getSection(sections, HEADING_ALIASES["问题定义"]!),
+    stateMachine: getSection(sections, HEADING_ALIASES["状态机"]!),
+    businessRules: extractIdList(getSection(sections, HEADING_ALIASES["业务规则"]!), "BR"),
+    acceptanceCriteria: extractIdList(getSection(sections, ["验收条件", "Acceptance Criteria"]), "AC"),
+    apiContract: parseApiTable(getSection(sections, HEADING_ALIASES["API契约"]!)),
+    domainModel: getSection(sections, HEADING_ALIASES["领域模型"]!),
+    schemaChanges: getSection(sections, OPTIONAL_HEADINGS["Schema变更"]!),
+    compatibilityConstraints: getSection(sections, OPTIONAL_HEADINGS["兼容性约束"]!),
+    acTestMapping: parseAcTestMappingTable(getSection(sections, OPTIONAL_HEADINGS["AC-测试映射"]!)),
   };
 
   const result = ContractSchema.safeParse(candidate);

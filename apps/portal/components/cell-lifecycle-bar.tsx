@@ -130,7 +130,7 @@ export function CellLifecycleBar({
                       : state === "current"
                         ? "当前阶段"
                         : state === "legacy"
-                          ? "已有旧实现"
+                          ? "已过阶段"
                           : "待执行"
                   }
                 >

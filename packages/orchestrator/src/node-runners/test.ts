@@ -3,9 +3,8 @@
 // 全绿 → 通过 / 有失败 → 回退代码节点, failReason="test-failed"
 
 import type { Contract } from "@helmflow/contract-schema";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
-  loadSkillBody,
-  resolveSkillAdditionalDirs,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
@@ -35,11 +34,13 @@ interface RunTestNodeArgs {
 }
 
 export async function runTestNode(args: RunTestNodeArgs): Promise<NodeRunnerResult> {
-  const systemPrompt = loadSkillBody("verify", args.helmcodeRoot);
-  const skillAdditionalDirs = resolveSkillAdditionalDirs("verify", args.helmcodeRoot);
+  const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const versionInfo = manager?.getVersion();
+  const systemPrompt = manager ? manager.loadSkillBody("verify") : "";
+  const skillAdditionalDirs = manager ? manager.resolveSkillAdditionalDirs("verify") : [];
 
   const run = createRun(args.db, args.cellId, "test");
-  const attempt = createAttempt(args.db, run.id, "test", args.iteration, "running");
+  const attempt = createAttempt(args.db, run.id, "test", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const acIds = args.contract.acceptanceCriteria.map((a) => a.id).join(", ");
 

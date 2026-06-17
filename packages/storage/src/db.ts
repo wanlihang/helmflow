@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS node_attempts (
   status TEXT NOT NULL,
   output_path TEXT,
   started_at TEXT NOT NULL,
-  finished_at TEXT
+  finished_at TEXT,
+  standards_version TEXT,
+  standards_checksum TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_node_attempts_run_id ON node_attempts(run_id);
@@ -149,8 +151,76 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT,
   manifest_path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
-  registered_at INTEGER NOT NULL
+  registered_at INTEGER NOT NULL,
+  helmcode_version TEXT,
+  standards_checksum TEXT
 );
+
+CREATE TABLE IF NOT EXISTS contract_sync_results (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  contract_feature_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  chosen_cell_id TEXT,
+  mapped_feature_id TEXT,
+  mapped_scenario_name TEXT,
+  helmcode_status TEXT NOT NULL,
+  target_scenario_status TEXT,
+  candidates_json TEXT NOT NULL DEFAULT '[]',
+  reasons_json TEXT NOT NULL DEFAULT '[]',
+  scanned_at TEXT NOT NULL,
+  UNIQUE(project_id, contract_feature_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_csr_project_state ON contract_sync_results(project_id, state);
+
+CREATE TABLE IF NOT EXISTS contract_cell_mappings (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  contract_feature_id TEXT NOT NULL,
+  feature_id TEXT NOT NULL,
+  scenario_name TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, contract_feature_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ccm_project ON contract_cell_mappings(project_id);
+
+CREATE TABLE IF NOT EXISTS standards_migrations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  from_checksum TEXT,
+  to_checksum TEXT NOT NULL,
+  from_git_head TEXT,
+  to_git_head TEXT,
+  action TEXT NOT NULL,
+  changed_files_json TEXT NOT NULL DEFAULT '[]',
+  affected_count INTEGER NOT NULL DEFAULT 0,
+  operator TEXT NOT NULL DEFAULT 'portal',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sm_project ON standards_migrations(project_id);
+
+CREATE TABLE IF NOT EXISTS pipeline_queue (
+  id TEXT PRIMARY KEY,
+  cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  contract_id TEXT NOT NULL REFERENCES contracts(id),
+  state TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  claimed_by TEXT,
+  claimed_at TEXT,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_queue_state ON pipeline_queue(state);
+CREATE INDEX IF NOT EXISTS idx_pipeline_queue_cell_id ON pipeline_queue(cell_id);
 `;
 
 const MIGRATION_DDL = `
@@ -161,8 +231,20 @@ ALTER TABLE features ADD COLUMN context TEXT NOT NULL DEFAULT '';
 ALTER TABLE features ADD COLUMN priority TEXT NOT NULL DEFAULT '';
 ALTER TABLE features ADD COLUMN legacy_flow_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE features ADD COLUMN legacy_activities TEXT NOT NULL DEFAULT '';
+-- 分层归属扩展(Decider/Acceptor)
+ALTER TABLE features ADD COLUMN decider TEXT NOT NULL DEFAULT '';
+ALTER TABLE features ADD COLUMN acceptor TEXT NOT NULL DEFAULT '';
 -- Goal 13: feature_scenarios 新列
 ALTER TABLE feature_scenarios ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+-- 控制平面回归: contracts 加列(为 HelmCode 契约导入铺路,第一刀不写入)
+ALTER TABLE contracts ADD COLUMN source TEXT NOT NULL DEFAULT 'clarifier';
+ALTER TABLE contracts ADD COLUMN project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE contracts ADD COLUMN origin_path TEXT NOT NULL DEFAULT '';
+-- 控制平面回归第三刀: 版本感知(projects + node_attempts)
+ALTER TABLE projects ADD COLUMN helmcode_version TEXT;
+ALTER TABLE projects ADD COLUMN standards_checksum TEXT;
+ALTER TABLE node_attempts ADD COLUMN standards_version TEXT;
+ALTER TABLE node_attempts ADD COLUMN standards_checksum TEXT;
 `;
 
 const cache = new Map<string, DB>();
@@ -175,13 +257,22 @@ export function createDb(path: string): DB {
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.exec(SCHEMA_DDL);
-  // 运行增量迁移 — 仅忽略 "duplicate column" 错误
-  try {
-    sqlite.exec(MIGRATION_DDL);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("duplicate column name")) {
-      throw err; // re-throw real migration failures
+  // 运行增量迁移 — 逐条执行,各自忽略 "duplicate column"(列已存在),其它错误抛出。
+  // 先整体剥离 SQL 行注释(-- ...),再按分号切分,避免注释与语句混在同一块导致误跳过。
+  const noComments = MIGRATION_DDL
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
+  for (const stmt of noComments.split(";")) {
+    const trimmed = stmt.trim();
+    if (trimmed.length === 0) continue;
+    try {
+      sqlite.exec(trimmed);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("duplicate column name")) {
+        throw err; // re-throw real migration failures
+      }
     }
   }
   const db = drizzle(sqlite, { schema });

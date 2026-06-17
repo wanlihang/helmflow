@@ -1,20 +1,18 @@
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { parse } from "yaml";
 import { features, featureScenarios, cellId as makeCellId, listFeatureScenarios } from "@helmflow/storage";
 import { getProject } from "@helmflow/manifest-loader";
 import { getDb } from "./db";
-import { syncMatrixToDb } from "./sync-matrix";
 
-export interface Legacy {
-  flowCode: string;
-  activities: string[];
-}
-
-export interface Target {
-  handler: string;
-  actions: string[];
-  context: string;
+/**
+ * 分层架构归属(implementation) — 功能点在 DDD 四层结构(Decider/Acceptor/Handler/Action)里的位置。
+ * 由分析产出(analyze 扫码识别 / require 分层分析 / analyze-structure 推断),非 matrix.yaml 预设。
+ * 新需求澄清后才产出;存量代码扫码识别;未分析时各字段为空。
+ */
+export interface Implementation {
+  decider: string;     // 决策层(走哪个分支)
+  acceptor: string;    // 接收/校验层
+  handler: string;     // 业务编排层
+  actions: string[];   // 执行步骤
+  context: string;     // 所属域
 }
 
 export type FeatureStatus =
@@ -30,6 +28,8 @@ export type FeatureStatus =
 
 export type FeaturePriority = "P0" | "P1" | "P2";
 
+// ScenarioStatus 字符串 token 不变(133 处引用 + DB + contract-sync status_map + LLM 输出依赖);
+// 语义为「开发治理状态」:已支持=已实现维护态 / 需改造=已实现待治理对齐 / 待实现=未落地 / 废弃=下线。
 export type ScenarioStatus = "已支持" | "需改造" | "待实现" | "废弃";
 
 export interface Scenario {
@@ -42,8 +42,7 @@ export interface Scenario {
 export interface Feature {
   id: string;
   name: string;
-  legacy: Legacy;
-  target: Target;
+  implementation: Implementation;
   priority: FeaturePriority;
   scenarios: Scenario[];
 }
@@ -94,67 +93,48 @@ function safeJsonParse<T>(str: string, fallback: T): T {
   }
 }
 
-const DEFAULT_MATRIX_PATH = join(process.cwd(), "data", "feature-matrix.yaml");
+// 域名称内置映射(yaml 退役后,domain 中文名从这取;未知域用 id 本身)
+const DOMAIN_NAMES: Record<string, string> = {
+  deliver: "交付管理",
+  mapping: "产品映射",
+  pricing: "价格配置",
+  signing: "签约",
+  ops: "运维",
+  shared: "共享",
+};
 
-interface RawYamlDomain {
-  id: string;
-  name: string;
-}
-
-interface RawYamlMatrix {
-  project: string;
-  description?: string;
-  schemaVersion?: number;
-  domains: RawYamlDomain[];
-}
-
-/** 读取 YAML 获取 description / sandboxPath / domain names / schemaVersion (仅作为元数据补充) */
-function loadYamlMeta(projectId?: string): {
+/**
+ * 从 manifest 读项目元信息(yaml 退役后不再读 yaml)。
+ */
+function loadProjectMeta(projectId?: string): {
   description?: string;
   sandboxPath?: string;
-  schemaVersion: number;
   domainNameMap: Map<string, string>;
   project: string;
 } {
-  let matrixPath = DEFAULT_MATRIX_PATH;
   let sandboxPath: string | undefined;
+  let description: string | undefined;
   if (projectId) {
     try {
       const project = getProject(projectId);
       if (project) {
-        const monorepoRoot = resolve(process.cwd(), "..", "..");
-        matrixPath = resolve(monorepoRoot, project.manifest.featureMatrixPath);
         sandboxPath = project.manifest.sandboxPath;
+        description = project.manifest.description;
       }
     } catch { /* fallback */ }
   }
-  try {
-    const rawText = readFileSync(matrixPath, "utf-8");
-    const raw = parse(rawText) as RawYamlMatrix;
-    const domainNameMap = new Map<string, string>();
-    for (const d of raw.domains ?? []) {
-      domainNameMap.set(d.id, d.name);
-    }
-    return {
-      description: raw.description,
-      sandboxPath,
-      schemaVersion: raw.schemaVersion ?? 2,
-      domainNameMap,
-      project: raw.project,
-    };
-  } catch {
-    return { schemaVersion: 2, domainNameMap: new Map(), project: projectId ?? "mycmdeliverhub" };
-  }
+  return {
+    description,
+    sandboxPath,
+    domainNameMap: new Map(Object.entries(DOMAIN_NAMES)),
+    project: projectId ?? "mycmdeliverhub",
+  };
 }
 
 /**
- * 从 DB 构建 FeatureMatrix。
- * 先调用 syncMatrixToDb 确保 YAML 已 seed 到 DB,
- * 然后纯从 DB 的 features + feature_scenarios 表构建完整结构。
+ * 从 DB 构建 FeatureMatrix(yaml 退役:纯 DB 读,不再 seed)。
  */
 export function loadMatrix(projectId?: string): FeatureMatrix {
-  // 确保 YAML 数据已 seed 到 DB
-  syncMatrixToDb(projectId);
 
   const db = getDb();
 
@@ -176,11 +156,9 @@ export function loadMatrix(projectId?: string): FeatureMatrix {
     const f: Feature = {
       id: row.id,
       name: row.name,
-      legacy: {
-        flowCode: row.legacyFlowCode ?? "",
-        activities: safeJsonParse<string[]>(row.legacyActivities ?? "", []),
-      },
-      target: {
+      implementation: {
+        decider: row.decider ?? "",
+        acceptor: row.acceptor ?? "",
         handler: row.handler ?? "",
         actions: safeJsonParse<string[]>(row.actions ?? "", []),
         context: row.context ?? "",
@@ -201,8 +179,8 @@ export function loadMatrix(projectId?: string): FeatureMatrix {
     domainFeatureMap.get(row.domain)!.push(f);
   }
 
-  // 从 YAML 获取 domain names 和 description
-  const meta = loadYamlMeta(projectId);
+  // 从 manifest 获取 domain names 和 description(yaml 退役)
+  const meta = loadProjectMeta(projectId);
   const domains: Domain[] = domainOrder.map((domainId) => ({
     id: domainId,
     name: meta.domainNameMap.get(domainId) ?? domainId,
@@ -213,7 +191,7 @@ export function loadMatrix(projectId?: string): FeatureMatrix {
     project: effectiveProjectId,
     sandboxPath: meta.sandboxPath,
     description: meta.description,
-    schemaVersion: meta.schemaVersion,
+    schemaVersion: 3,
     domains,
   };
 }
@@ -241,7 +219,6 @@ export function getDomainOfFeature(id: string, projectId?: string): Domain | und
 }
 
 export function getTotalFeatureCount(projectId?: string): number {
-  syncMatrixToDb(projectId);
   const db = getDb();
   const effectiveProjectId = projectId ?? "mycmdeliverhub";
   return db
@@ -253,7 +230,6 @@ export function getTotalFeatureCount(projectId?: string): number {
 }
 
 export function getAllScenarioNames(projectId?: string): string[] {
-  syncMatrixToDb(projectId);
   const db = getDb();
   const effectiveProjectId = projectId ?? "mycmdeliverhub";
   const featureRows = db

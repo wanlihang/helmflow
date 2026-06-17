@@ -217,7 +217,7 @@ ${handlersJson}
 
 场景代表**同一功能在不同业务条件下的流程差异**。典型模式：
 
-1. **签约类型**：正式签约 / 测试签约
+1. **签约类型**：正式签约
 2. **业务模式**：组合签约 / 单品签约 / 历史组合复用
 3. **业务来源**：手动创建 / 批量导入 / API 触发
 4. **签约渠道**：线上签约 / 线下签约
@@ -242,7 +242,7 @@ ${handlersJson}
 
 **策略 A — 有 businessDimensions 时的精确推断（置信度 high）**:
 - 直接从 Handler 的 businessDimensions 提取业务维度
-- 例: businessDimensions=["contractType: FORMAL | TEST"] → 场景: "正式签约" / "测试签约"
+- 例: businessDimensions=["contractType: FORMAL"] → 场景: "正式签约"
 - 例: businessDimensions=["signingMode: COMBO | SINGLE"] → 场景: "组合签约" / "单品签约"
 - 例: businessDimensions=["source: MANUAL | IMPORT"] → 场景: "手动创建" / "批量导入"
 
@@ -287,8 +287,7 @@ ${handlersJson}
           "context": "deliver",
           "priority": "P1",
           "scenarios": [
-            {"name": "正式签约", "status": "待实现", "confidence": "high", "branchHint": "contractType: FORMAL | TEST"},
-            {"name": "测试签约", "status": "待实现", "confidence": "high", "branchHint": "contractType: FORMAL | TEST"}
+            {"name": "正式签约", "status": "待实现", "confidence": "high", "branchHint": "contractType: FORMAL"}
           ]
         },
         {

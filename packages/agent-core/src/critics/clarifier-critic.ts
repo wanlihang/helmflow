@@ -79,5 +79,9 @@ export function runClarifierCritic(contract: Contract): CriticResult {
     });
   }
 
+  // 注:AC-测试映射校验(HelmCode clarify approved 守卫)暂未启用为 hard rule —
+  // 当前解析未区分 AC 的验证方式(测试/脚本/命令),精确校验做不了,且过严会卡住 Clarifier
+  // 产出。待 Clarifier 稳定产出 9 章节后,作为补强 critic 启用。contract.acTestMapping 已解析可用。
+
   return { pass: issues.length === 0, issues };
 }

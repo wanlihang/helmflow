@@ -175,11 +175,15 @@ ${contractMarkdown}
       startHb();
       try {
         const sse = (payload: unknown) => {
-          controller.enqueue(sseEncode(encoder, payload));
           try {
             createRunEvent(db, run.id, (payload as { type: string }).type, payload);
           } catch {
             // DB 写入失败不应阻塞流
+          }
+          try {
+            controller.enqueue(sseEncode(encoder, payload));
+          } catch {
+            // controller 已关闭,事件已落库不丢
           }
         };
 

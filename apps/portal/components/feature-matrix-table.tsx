@@ -45,7 +45,15 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+        {/* table-fixed + w-full:ID/功能列固定窄宽,场景列等分剩余空间撑满容器,消除最后一列右侧空白;所有域同列数同容器,列位严格对齐 */}
+        <table className="table-fixed w-full border-collapse text-sm">
+          <colgroup>
+            <col className="w-20" />
+            <col className="w-44" />
+            {scenarioNames.map((name) => (
+              <col key={name} />
+            ))}
+          </colgroup>
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="whitespace-nowrap px-3 py-2 text-left font-semibold">ID</th>
@@ -69,7 +77,7 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
                     {feature.id}
                   </button>
                 </td>
-                <td className="whitespace-nowrap px-3 py-2">
+                <td className="truncate px-3 py-2" title={feature.name}>
                   <button
                     type="button"
                     className="text-left hover:text-blue-600 hover:underline cursor-pointer"

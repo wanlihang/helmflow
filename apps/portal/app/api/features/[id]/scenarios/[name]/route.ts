@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { deleteScenario, cellId as makeCellId, getCellRow, getFeatureRow } from "@helmflow/storage";
-import { resetMatrixSyncFlag } from "@/lib/sync-matrix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +31,5 @@ export async function DELETE(_req: Request, ctx: RouteContext): Promise<Response
   }
 
   deleteScenario(db, cid);
-  resetMatrixSyncFlag();
   return NextResponse.json({ deleted: cid });
 }

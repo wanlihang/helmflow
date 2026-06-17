@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { parse as parseYaml } from "yaml";
 import { parseContract } from "@helmflow/contract-schema";
+import { parseHelmcodeContract } from "@helmflow/contract-sync";
 import {
   getLatestContract,
   getLatestCommit,
@@ -22,11 +23,8 @@ import { CellFiles } from "@/components/cell-files";
 import { CellLifecycleBar } from "@/components/cell-lifecycle-bar";
 import { CellStatusSelect } from "@/components/cell-status-select";
 import { CellTimeline } from "@/components/cell-timeline";
-import { ContractView } from "@/components/contract-view";
+import { ContractView, ContractFallbackView, ContractRawView } from "@/components/contract-view";
 import { ReimplementButton } from "@/components/reimplement-button";
-import { RunCoderButton } from "@/components/run-coder-button";
-import { RunCommitterButton } from "@/components/run-committer-button";
-import { RunQaButton } from "@/components/run-qa-button";
 import { StartFeatureDialog } from "@/components/start-feature-dialog";
 import { StartFullLoopButton } from "@/components/start-full-loop-button";
 import { VerifyCellButton } from "@/components/verify-cell-button";
@@ -64,7 +62,11 @@ function loadContractForCell(cellId: string): LoadedContract | null {
     const row = getLatestContract(getDb(), cellId);
     if (!row) return null;
     try {
-      const md = readFileSync(join(process.cwd(), row.markdownPath), "utf-8");
+      // 兼容绝对路径(目标项目 HelmCode 导入契约)与相对路径(历史 Clarifier 产出)
+      const mdPath = isAbsolute(row.markdownPath)
+        ? row.markdownPath
+        : join(process.cwd(), row.markdownPath);
+      const md = readFileSync(mdPath, "utf-8");
       return { row, markdown: md, readError: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -155,7 +157,7 @@ export default async function CellPage({ params }: CellPageProps) {
 
   return (
     <div className="space-y-6">
-      {/* Section A: 基本信息 */}
+      {/* 面包屑 */}
       <nav className="text-sm text-muted-foreground">
         <Link href="/" className="hover:text-foreground">Home</Link>
         <span className="mx-2">/</span>
@@ -166,6 +168,7 @@ export default async function CellPage({ params }: CellPageProps) {
         <span className="text-foreground">{scenarioName}</span>
       </nav>
 
+      {/* ① 当前状态 + 引导 */}
       <header className="space-y-3 border-b border-border pb-4">
         <h1 className="text-3xl font-bold tracking-tight">
           <span className="font-mono text-muted-foreground">{id}</span>{" "}
@@ -174,8 +177,9 @@ export default async function CellPage({ params }: CellPageProps) {
         </h1>
         <div className="flex flex-wrap items-center gap-2">
           <Badge scenario={scenario.status} />
-          <Badge status={scenario.agentStatus} />
-          <span className="font-mono text-xs text-muted-foreground">cell: {cellId}</span>
+          {scenario.agentStatus !== "not-started" && scenario.agentStatus !== "done" && (
+            <Badge status={scenario.agentStatus} />
+          )}
         </div>
 
         {/* 生命周期进度条 */}
@@ -187,109 +191,69 @@ export default async function CellPage({ params }: CellPageProps) {
         />
       </header>
 
-      {/* 功能概览：所有格子都展示 Target + Legacy 信息 */}
-      <section className="grid grid-cols-1 gap-4 border-b border-border pb-4 lg:grid-cols-2">
-        <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">目标实现</h2>
-          {(feature.target.handler || feature.target.actions.length > 0) ? (
-            <div className="space-y-1 text-xs">
-              {feature.target.handler && (
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 font-mono font-semibold text-blue-700">Handler</span>
-                  <span className="font-mono text-foreground">{feature.target.handler}</span>
-                </div>
-              )}
-              {feature.target.actions.length > 0 && (
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 font-mono font-semibold text-purple-700">Actions</span>
-                  <div className="space-y-0.5">
-                    {feature.target.actions.map((a) => (
-                      <div key={a} className="font-mono text-foreground">{a}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {feature.target.context && (
-                <div className="flex items-start gap-2 text-muted-foreground">
-                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono font-semibold">Context</span>
-                  <span className="font-mono">{feature.target.context}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">无专属 handler/action（查询类或通用功能）</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">旧实现 (Legacy)</h2>
-          {(feature.legacy.flowCode || feature.legacy.activities.length > 0) ? (
-            <div className="space-y-1 text-xs">
-              {feature.legacy.flowCode && (
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 font-mono font-semibold text-amber-700">Flow</span>
-                  <span className="font-mono text-foreground">{feature.legacy.flowCode}</span>
-                </div>
-              )}
-              {feature.legacy.activities.length > 0 && (
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono font-semibold text-orange-700">Activities</span>
-                  <div className="space-y-0.5">
-                    {feature.legacy.activities.map((a) => (
-                      <div key={a} className="font-mono text-foreground">{a}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">无旧实现（全新功能）</div>
-          )}
-        </div>
-      </section>
+      {/* 分层归属精简(链接 feature 页看全) */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted-foreground">分层归属:</span>
+        {(feature.implementation.decider || feature.implementation.acceptor || feature.implementation.handler) ? (
+          <Link href={`/features/${id}`} className="flex items-center gap-1 font-mono text-blue-600 hover:underline">
+            {feature.implementation.decider && <span>{feature.implementation.decider}</span>}
+            {feature.implementation.acceptor && <>{" → "}<span>{feature.implementation.acceptor}</span></>}
+            {feature.implementation.handler && <>{" → "}<span>{feature.implementation.handler}</span></>}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">待分析</span>
+        )}
+      </div>
 
-      {/* 状态提示条 */}
+      {/* 生命周期引导:根据状态提示 + 操作按钮 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2.5">
+        {canOperate && (!contract || contract.row.status === "blocked" || contract.row.status === "draft") && (
+          <StartFeatureDialog
+            cellId={cellId}
+            featureName={feature.name}
+            scenarioName={scenarioName}
+            existingContract={contract ? { id: contract.row.id, status: contract.row.status, markdown: contract.markdown } : null}
+          />
+        )}
+        {canOperate && contract?.row.status === "approved" && (
+          <StartFullLoopButton contractId={contract.row.id} />
+        )}
+        {isSupported && (
+          <>
+            <VerifyCellButton cellId={cellId} />
+            <ReimplementButton cellId={cellId} />
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <CellStatusSelect cellId={cellId} currentStatus={scenario.status} />
+          <AnalyzeCellButton cellId={cellId} />
+        </div>
+      </div>
+
+      {scenario.agentStatus === "blocked" && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Agent 流程受阻。可重新启动需求生成新契约,或修改状态后重试全流程。
+        </div>
+      )}
       {isDeprecated && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          此功能已废弃,无需 agent 介入。
-        </div>
-      )}
-      {isSupported && scenario.agentStatus !== "done" && (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          此格子已支持。可验证正确性或重新实现。
-        </div>
-      )}
-      {canOperate && scenario.agentStatus === "not-started" && !contract && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-          下一步:点击「启动需求」描述你的需求,让 Clarifier 生成行为契约。
-        </div>
-      )}
-      {canOperate && contract?.row.status === "draft" && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-          下一步:审阅下方契约草稿,确认无误后点击「审批契约」。
-        </div>
-      )}
-      {canOperate && contract?.row.status === "approved" && scenario.agentStatus === "pending-goal" && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-          下一步:契约已审批,点击「启动全流程」一键执行 需求 → 代码 → 测试 → 上线。
+          此功能已废弃,不纳入开发管理。
         </div>
       )}
 
-      {/* Section B: 状态操作栏 */}
-      <section className="flex flex-wrap items-center gap-3 border-b border-border pb-4">
-        <span className="text-xs font-semibold text-muted-foreground">业务状态:</span>
-        <CellStatusSelect cellId={cellId} currentStatus={scenario.status} />
-        <AnalyzeCellButton cellId={cellId} />
-      </section>
-
-      {/* Section C: 契约区 */}
+      {/* ② 契约(需求规格) */}
       {contract !== null && (
         <section className="space-y-3 border-b border-border pb-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold">行为契约</h2>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${
-                contract.row.status === "approved" ? "bg-green-100 text-green-700 border border-green-200"
-                : contract.row.status === "blocked" ? "bg-red-100 text-red-700 border border-red-200"
+                contract.row.status === "approved" || contract.row.status === "done"
+                  ? "bg-green-100 text-green-700 border border-green-200"
+                : contract.row.status === "goal-running"
+                  ? "bg-blue-100 text-blue-700 border border-blue-200"
+                : contract.row.status === "blocked"
+                  ? "bg-red-100 text-red-700 border border-red-200"
                 : "bg-yellow-100 text-yellow-700 border border-yellow-200"
               }`}>
                 {contract.row.status}
@@ -303,9 +267,17 @@ export default async function CellPage({ params }: CellPageProps) {
               if (parsed.ok) {
                 return <ContractView contract={parsed.data} rawMarkdown={contract.markdown} />;
               }
+              // 结构化解析失败(HelmCode 格式或老英文契约)→ 元信息+原文兜底
+              const hc = parseHelmcodeContract(contract.markdown, contract.row.markdownPath);
+              if (hc.ok) {
+                return <ContractFallbackView meta={hc.data} rawMarkdown={contract.markdown} />;
+              }
               return (
-                <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
-                  契约解析失败: {parsed.errors.join("; ")}
+                <div className="space-y-2">
+                  <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
+                    契约结构化解析失败(可能为非标准格式),仅展示原文。
+                  </div>
+                  <ContractRawView rawMarkdown={contract.markdown} />
                 </div>
               );
             })()
@@ -320,54 +292,9 @@ export default async function CellPage({ params }: CellPageProps) {
         </section>
       )}
 
-      {/* Section D: Agent 操作区 (仅可操作) */}
-      {canOperate && (
-        <section className="space-y-3 border-b border-border pb-4">
-          <h2 className="text-base font-semibold">Agent 操作</h2>
-
-          {/* 下一步操作提示 */}
-          {scenario.agentStatus === "blocked" && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              此格子的 Agent 流程受阻。你可以重新运行 Clarifier 生成新契约,或展开手动模式从特定步骤重试。
-            </div>
-          )}
-
-          {/* 启动需求 (Clarifier): 无契约 / 契约 blocked / 契约 draft 都可重新运行 */}
-          {(!contract || contract.row.status === "blocked" || contract.row.status === "draft") && (
-            <StartFeatureDialog
-              cellId={cellId}
-              featureName={feature.name}
-              scenarioName={scenarioName}
-              existingContract={contract ? { id: contract.row.id, status: contract.row.status, markdown: contract.markdown } : null}
-            />
-          )}
-
-          {/* 全流程 + 手动模式:契约 approved 时可用 */}
-          {contract?.row.status === "approved" && (
-            <div className="space-y-3">
-              <StartFullLoopButton contractId={contract.row.id} />
-              <details className="rounded-md border border-border p-3" open={scenario.agentStatus === "blocked"}>
-                <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">
-                  手动模式(逐步执行 — 需求/代码/测试/上线)
-                </summary>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <RunCoderButton contractId={contract.row.id} />
-                  {(scenario.agentStatus === "tests-pending" || scenario.agentStatus === "blocked") && (
-                    <RunQaButton cellId={cellId} />
-                  )}
-                  {(scenario.agentStatus === "qa-passed" || scenario.agentStatus === "blocked") && (
-                    <RunCommitterButton cellId={cellId} />
-                  )}
-                </div>
-              </details>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Section E: 历史区 */}
+      {/* ③ 历史与验证 */}
       <section className="space-y-4 border-b border-border pb-4">
-        <h2 className="text-base font-semibold">历史记录</h2>
+        <h2 className="text-base font-semibold">历史与验证</h2>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="space-y-2">
@@ -421,13 +348,6 @@ export default async function CellPage({ params }: CellPageProps) {
         )}
       </section>
 
-      {/* Section F: 已支持格子操作区 */}
-      {isSupported && (
-        <section className="flex flex-wrap items-center gap-3 border-b border-border pb-4">
-          <VerifyCellButton cellId={cellId} />
-          <ReimplementButton cellId={cellId} />
-        </section>
-      )}
     </div>
   );
 }

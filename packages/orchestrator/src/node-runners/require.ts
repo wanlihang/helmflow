@@ -4,9 +4,8 @@
 // 失败时 failReason="spec-rejected"
 
 import type { Contract } from "@helmflow/contract-schema";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
-  loadSkillBody,
-  resolveSkillAdditionalDirs,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
@@ -38,11 +37,13 @@ interface RunRequireNodeArgs {
 }
 
 export async function runRequireNode(args: RunRequireNodeArgs): Promise<NodeRunnerResult> {
-  const systemPrompt = loadSkillBody("clarify", args.helmcodeRoot);
-  const additionalDirs = resolveSkillAdditionalDirs("clarify", args.helmcodeRoot);
+  const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const versionInfo = manager?.getVersion();
+  const systemPrompt = manager ? manager.loadSkillBody("clarify") : "";
+  const additionalDirs = manager ? manager.resolveSkillAdditionalDirs("clarify") : [];
 
   const run = createRun(args.db, args.cellId, "require");
-  const attempt = createAttempt(args.db, run.id, "require", args.iteration, "running");
+  const attempt = createAttempt(args.db, run.id, "require", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const reflectionAppendix = buildReflectionAppendix(args.reflections ?? []);
 

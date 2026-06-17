@@ -40,8 +40,6 @@ interface FeatureInfo {
   id: string;
   name: string;
   domainId: string;
-  targetHandler: string;
-  targetActions: string[];
   projectId: string;
   cellId: string;
 }
@@ -51,9 +49,7 @@ function loadFeatureFromContract(contract: Contract, contractRow: ContractRow): 
     id: contract.featureId,
     name: contract.featureId,
     domainId: contract.domain,
-    targetHandler: "",
-    targetActions: [],
-    projectId: contract.project,
+    projectId: contractRow.projectId || contract.matrixCellId,
     cellId: contractRow.cellId,
   };
 }

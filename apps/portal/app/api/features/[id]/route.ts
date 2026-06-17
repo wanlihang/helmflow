@@ -6,7 +6,6 @@ import {
   updateFeatureMeta,
   archiveFeature,
 } from "@helmflow/storage";
-import { resetMatrixSyncFlag } from "@/lib/sync-matrix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,8 +53,6 @@ export async function PATCH(req: Request, ctx: RouteContext): Promise<Response> 
   if (typeof body.actions === "string") updateArgs.actions = body.actions;
   if (typeof body.context === "string") updateArgs.context = body.context;
   if (typeof body.priority === "string") updateArgs.priority = body.priority;
-  if (typeof body.legacyFlowCode === "string") updateArgs.legacyFlowCode = body.legacyFlowCode;
-  if (typeof body.legacyActivities === "string") updateArgs.legacyActivities = body.legacyActivities;
   if (typeof body.domain === "string") updateArgs.domain = body.domain;
 
   if (Object.keys(updateArgs).length === 0) {
@@ -63,7 +60,6 @@ export async function PATCH(req: Request, ctx: RouteContext): Promise<Response> 
   }
 
   const updated = updateFeatureMeta(db, id, updateArgs);
-  resetMatrixSyncFlag();
   return NextResponse.json({ feature: updated });
 }
 
@@ -81,6 +77,5 @@ export async function DELETE(_req: Request, ctx: RouteContext): Promise<Response
     return NextResponse.json({ error: "功能已归档" }, { status: 400 });
   }
   const archived = archiveFeature(db, id);
-  resetMatrixSyncFlag();
   return NextResponse.json({ feature: archived });
 }

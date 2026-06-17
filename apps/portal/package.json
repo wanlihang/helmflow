@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@helmflow/contract-schema": "workspace:*",
+    "@helmflow/contract-sync": "workspace:*",
+    "@helmflow/helmcode-manager": "workspace:*",
+    "@helmflow/adapter-java-ddd": "workspace:*",
     "@helmflow/agent-core": "workspace:*",
     "@helmflow/agent-runner": "workspace:*",
     "@helmflow/storage": "workspace:*",

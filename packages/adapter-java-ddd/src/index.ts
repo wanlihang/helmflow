@@ -183,3 +183,6 @@ export function createJavaDddAdapter(projectPath: string): ProjectAdapter {
     },
   };
 }
+
+// 确定性 Java inventory 扫描器(analyze 拆分用)
+export { scanJavaInventory, type InventoryItem } from "./scanner";

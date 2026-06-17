@@ -6,7 +6,10 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build",
-    "dev": "pnpm --filter @helmflow/portal dev"
+    "dev": "pnpm --filter @helmflow/portal dev",
+    "worker:start": "pnpm --filter @helmflow/worker start",
+    "worker:dev": "pnpm --filter @helmflow/worker dev",
+    "helmcode:check": "node scripts/sync-standards.mjs"
   },
   "engines": {
     "node": ">=20.0.0",

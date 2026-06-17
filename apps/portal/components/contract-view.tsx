@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Contract } from "@helmflow/contract-schema";
+import type { HelmcodeContractMeta } from "@helmflow/contract-sync";
 
 interface ContractViewProps {
   contract: Contract;
@@ -128,5 +129,51 @@ export function ContractView({ contract, rawMarkdown }: ContractViewProps) {
         </Collapsible>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 兜底视图:结构化解析失败时,展示元信息卡片 + 原始 markdown。
+// 服务于 HelmCode 导入契约(无英文章节)和老英文契约。
+// ---------------------------------------------------------------------------
+
+const HC_STATUS_BADGE: Record<string, string> = {
+  done: "bg-green-100 text-green-700",
+  approved: "bg-green-100 text-green-700",
+  "goal-running": "bg-blue-100 text-blue-700",
+  draft: "bg-gray-100 text-gray-600",
+};
+
+export function ContractFallbackView({ meta, rawMarkdown }: { meta: HelmcodeContractMeta; rawMarkdown: string }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono font-semibold">{meta.featureId}</span>
+          <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${HC_STATUS_BADGE[meta.status] ?? "bg-gray-100 text-gray-600"}`}>
+            {meta.status}
+          </span>
+          {meta.domain && (
+            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
+              领域: {meta.domain}
+            </span>
+          )}
+        </div>
+        <div className="text-muted-foreground">
+          AC {meta.acCount} 条 · BR {meta.brCount} 条{meta.hasDomainModel ? " · 含领域模型" : ""}
+        </div>
+      </div>
+      <ContractRawView rawMarkdown={rawMarkdown} />
+    </div>
+  );
+}
+
+export function ContractRawView({ rawMarkdown }: { rawMarkdown: string }) {
+  return (
+    <Collapsible title="原始 Markdown" defaultOpen={false}>
+      <pre className="text-[10px] leading-relaxed whitespace-pre-wrap bg-muted rounded p-2 overflow-auto max-h-96">
+        {rawMarkdown}
+      </pre>
+    </Collapsible>
   );
 }

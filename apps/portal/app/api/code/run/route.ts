@@ -1,12 +1,11 @@
 // 代码节点 API — 加载 HelmCode core/implement skill。
 
 import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { getContractById, hasRunningRun, updateCellAgentStatus, listRunsByKind, listRunEvents, createRun, createRunEvent, updateRun, ensureVirtualCell } from "@helmflow/storage";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
-  loadSkillBody,
-  resolveSkillAdditionalDirs,
   runNode,
   type NodeRunEvent,
   type AllowedTool,
@@ -19,12 +18,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_TURNS = 40;
-
-function resolveStandardsRoot(): string {
-  const env = process.env.HELMFLOW_JAVA_DDD_STANDARDS;
-  if (env && env.length > 0) return resolve(env);
-  return resolve(process.cwd(), "..", "..", "standards", "java-ddd", "patterns");
-}
 
 interface CodeRequestBody {
   contractId?: unknown;
@@ -130,18 +123,20 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const helmcodeRoot = await resolveHelmcodeRoot();
+  const manager = helmcodeRoot ? new HelmcodeManager({ helmcodeRoot, preset: "java-ddd" }) : undefined;
 
   let systemPrompt: string;
   try {
-    systemPrompt = loadSkillBody("implement", helmcodeRoot);
+    systemPrompt = manager ? manager.loadSkillBody("implement") : "";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `Failed to load implement SKILL: ${message}` }, { status: 500 });
   }
 
-  const skillAdditionalDirs = resolveSkillAdditionalDirs("implement", helmcodeRoot);
-  const standardsRoot = resolveStandardsRoot();
-  const allAdditionalDirs = [standardsRoot, ...skillAdditionalDirs];
+  // patterns + skill references + standards,统一走 manager(替代硬编码 resolveStandardsRoot)
+  const allAdditionalDirs = manager
+    ? [manager.resolvePatterns(), ...manager.resolveSkillAdditionalDirs("implement")]
+    : [];
 
   const allowedTools: AllowedTool[] = ["Read", "Write", "Edit", "Bash"];
   const contractMarkdownPath = resolve(process.cwd(), contract.markdownPath);
@@ -182,11 +177,16 @@ ${contractMarkdown}
       startHb();
       try {
         const sse = (payload: unknown) => {
-          controller.enqueue(sseEncode(encoder, payload));
+          // 先持久化(独立 try),再 enqueue — 确保 error/异常路径下事件不丢(运行中心可诊断)
           try {
             createRunEvent(db, run.id, (payload as { type: string }).type, payload);
           } catch {
             // DB 写入失败不应阻塞流
+          }
+          try {
+            controller.enqueue(sseEncode(encoder, payload));
+          } catch {
+            // controller 已关闭(stream 中断),事件已落库不丢
           }
         };
 

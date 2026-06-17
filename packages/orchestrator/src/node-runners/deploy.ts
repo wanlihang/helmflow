@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Contract } from "@helmflow/contract-schema";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
   loadSkillBody,
   runNode,
@@ -80,8 +81,11 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
   const coderRun = getLatestRunByKind(args.db, args.cellId, "code");
   const testRun = getLatestRunByKind(args.db, args.cellId, "test");
 
+  const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const versionInfo = manager?.getVersion();
+
   const run = createRun(args.db, args.cellId, "deploy");
-  const attempt = createAttempt(args.db, run.id, "deploy", args.iteration, "running");
+  const attempt = createAttempt(args.db, run.id, "deploy", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const acIds = args.contract.acceptanceCriteria.map((a) => a.id);
 

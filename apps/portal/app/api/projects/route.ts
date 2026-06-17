@@ -108,23 +108,11 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // yaml 退役:featureMatrixPath 不再强制(留空默认,DB 唯一数据源)
   const featureMatrixPath =
     typeof body.featureMatrixPath === "string" && body.featureMatrixPath.trim()
       ? body.featureMatrixPath.trim()
-      : `projects/${id}/feature-matrix.yaml`;
-
-  if (featureMatrixPath !== `projects/${id}/feature-matrix.yaml`) {
-    const absMatrixPath = isAbsolute(featureMatrixPath)
-      ? featureMatrixPath
-      : resolve(MONOREPO_ROOT, featureMatrixPath);
-    const matrixDir = dirname(absMatrixPath);
-    if (!existsSync(matrixDir)) {
-      return NextResponse.json(
-        { error: `Feature Matrix 路径的父目录不存在: ${featureMatrixPath}` },
-        { status: 400 },
-      );
-    }
-  }
+      : "";
 
   // 唯一性:DB active 或 文件系统存在(且非 inactive 重激活场景)
   const db = getDb();

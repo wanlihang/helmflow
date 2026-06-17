@@ -8,7 +8,6 @@ import {
   listRunsByKind,
   getRunById,
 } from "@helmflow/storage";
-import { resetMatrixSyncFlag } from "@/lib/sync-matrix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -168,7 +167,6 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // 清除 matrix sync 标记使下次加载时刷新
-    resetMatrixSyncFlag();
 
     // 将对应的 analyze-structure run 标记为 "applied"，避免刷新后重复弹窗。
     // 优先用传入的 runId 精确标记；缺省时回退到最近一次已完成的 analyze-structure run。

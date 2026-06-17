@@ -16,8 +16,8 @@ function resolveMatrixPath(projectId?: string): string {
     try {
       const project = getProject(projectId);
       if (project) {
-        const monorepoRoot = resolve(process.cwd(), "..", "..");
-        return resolve(monorepoRoot, project.manifest.featureMatrixPath);
+        // matrix 锚定目标项目(control-plane §4 原则1):featureMatrixPath 相对 sandboxPath 解析
+        return resolve(project.manifest.sandboxPath, project.manifest.featureMatrixPath);
       }
     } catch {
       // fallback
@@ -32,22 +32,18 @@ interface RawScenario {
   note?: string;
 }
 
-interface RawTarget {
+interface RawImplementation {
   handler?: string;
   actions?: string[];
   context?: string;
 }
 
-interface RawLegacy {
-  flowCode?: string;
-  activities?: string[];
-}
-
 interface RawFeature {
   id: string;
   name: string;
-  legacy?: RawLegacy;
-  target?: RawTarget;
+  /** 实现定位(v3: implementation;v2 兼容旧 target 字段名)。无 legacy 概念。 */
+  implementation?: RawImplementation;
+  target?: RawImplementation; // v2 兼容:旧 yaml 用 target,读取时 fallback
   priority?: string;
   scenarios?: RawScenario[];
 }
@@ -122,17 +118,19 @@ export function syncMatrixToDb(projectId?: string): void {
   const domains = matrix.domains ?? [];
   for (const domain of domains) {
     for (const f of domain.features) {
+      // implementation(v3)优先,兼容旧 target(v2)字段名。无 legacy 概念,legacy 列不再写入。
+      const impl = f.implementation ?? f.target;
       upsertFeature(db, {
         id: f.id,
         projectId: projectName,
         domain: domain.id,
         name: f.name,
-        handler: f.target?.handler ?? "",
-        actions: f.target?.actions ? JSON.stringify(f.target.actions) : "",
-        context: f.target?.context ?? "",
+        handler: impl?.handler ?? "",
+        actions: impl?.actions ? JSON.stringify(impl.actions) : "",
+        context: impl?.context ?? "",
         priority: f.priority ?? "",
-        legacyFlowCode: f.legacy?.flowCode ?? "",
-        legacyActivities: f.legacy?.activities ? JSON.stringify(f.legacy.activities) : "",
+        legacyFlowCode: "",
+        legacyActivities: "",
       });
 
       if (f.scenarios && f.scenarios.length > 0) {

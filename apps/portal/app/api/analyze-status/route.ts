@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { runNode, runClassify } from "@helmflow/agent-runner";
+import { scanJavaInventory, type InventoryItem } from "@helmflow/adapter-java-ddd";
 import {
   getCellRow,
   createRun,
   createRunEvent,
   updateRun,
+  ensureVirtualCell,
+  updateCellAgentStatus,
+  updateFeatureScenarioStatus,
+  updateFeatureImplementation,
   listRunEvents,
   getRunById,
   listRunsByKind,
@@ -34,17 +39,18 @@ interface AnalysisResult {
   oldStatus: string;
   newStatus: string;
   reason: string;
+  implementation?: { decider?: string; acceptor?: string; handler?: string; actions?: string[] };
 }
 
-interface InventoryItem {
-  className: string;
-  qualifiedName: string;
-  type: "handler" | "action" | "other";
-  methods: number;
-  todos: number;
-  lines: number;
-  skeleton: boolean;
+/** LLM 分析输出(parseAnalysisOutput 解析) */
+interface AnalysisOutput {
+  cellId: string;
+  newStatus: string;
+  reason: string;
+  implementation?: { decider?: string; acceptor?: string; handler?: string; actions?: string[] };
 }
+
+// InventoryItem 类型从 @helmflow/adapter-java-ddd 导入(scanJavaInventory 产出)
 
 interface CellInfo {
   cellId: string;
@@ -96,16 +102,15 @@ function buildClassifyPrompt(inventory: InventoryItem[], cells: CellInfo[]): str
   const inventoryJson = JSON.stringify(inventory, null, 2);
 
   const cellLines = cells.map((c) => {
-    const handler = c.feature.target.handler || "(无)";
-    const actions = c.feature.target.actions.length > 0 ? c.feature.target.actions.join(", ") : "(无)";
-    return `- cellId: ${c.cellId} | handler: ${handler} | actions: ${actions} | currentStatus: ${c.scenario.status}`;
+    // 不依赖预设 implementation(可能为空)——给 LLM feature name/domain 让它从 inventory 语义匹配
+    return `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
   });
 
   return `## 任务
 
-根据代码扫描结果，判断每个格子的实现状态。
+根据代码扫描结果(inventory),为每个功能点匹配 DDD 分层归属(Decider/Acceptor/Handler/Action)并判断实现状态。
 
-## 扫描结果（代码清单）
+## 扫描结果（代码清单,含分层类型）
 
 \`\`\`json
 ${inventoryJson}
@@ -117,29 +122,33 @@ ${cellLines.join("\n")}
 
 ## 判断规则
 
-对每个格子：
-1. 在扫描结果中查找 target.handler 对应的类（按类名匹配）
-2. 在扫描结果中查找 target.actions 对应的类（按类名匹配）
-3. 综合判断：
-   - Handler 和所有 Actions 都存在，且无 TODO、非骨架 → "已支持"
-   - 类存在但有 TODO 或是骨架代码 → "需改造"
+对每个格子,从 inventory 中按功能语义匹配该功能的分层链路:
+1. 在 type=decider 的类里找该功能对应的 Decider
+2. 在 type=acceptor 的类里找该功能对应的 Acceptor
+3. 在 type=handler 的类里找该功能对应的 Handler(主入口)
+4. 在 type=action 的类里找该功能对应的 Actions(执行步骤)
+5. 综合判断状态:
+   - Handler + 主要 Actions 都存在,且无 TODO、非骨架 → "已支持"
+   - 类存在但有 TODO 或骨架代码 → "需改造"
    - 关键类不存在 → "待实现"
    - currentStatus 为"废弃" → 保持"废弃"
 
 ## 输出格式
 
-输出 JSON 数组，用 \`<ANALYSIS_RESULT>\` 和 \`</ANALYSIS_RESULT>\` 标签包裹：
+输出 JSON 数组,用 \`<ANALYSIS_RESULT>\` 和 \`</ANALYSIS_RESULT>\` 标签包裹。每个格子必须有结果,含匹配到的分层链路:
 
 \`\`\`
 <ANALYSIS_RESULT>
 [
-  {"cellId": "D-01__正式签约", "newStatus": "已支持", "reason": "SaveDeliverRecordHandler 存在且逻辑完整，5 个方法无 TODO"},
+  {"cellId": "D-01__正式签约", "newStatus": "已支持", "reason": "SaveDeliverRecordHandler 存在且逻辑完整",
+   "implementation": {"decider": "DeliverDecider", "acceptor": "DeliverRecordAcceptor", "handler": "SaveDeliverRecordHandler", "actions": ["SaveDeliverRecordAction", "CreateFlowInstanceAction"]}},
+  {"cellId": "P-01__正式签约", "newStatus": "待实现", "reason": "未找到对应类", "implementation": {}},
   ...
 ]
 </ANALYSIS_RESULT>
 \`\`\`
 
-只输出 JSON 数组（带标签），不要其他内容。每个格子都必须有结果。`;
+只输出 JSON 数组(带标签),不要其他内容。implementation 字段:匹配到的类名填上,没匹配到的留空对象或不填该字段。`;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +175,7 @@ function parseInventoryOutput(text: string): InventoryItem[] {
   }
 }
 
-function parseAnalysisOutput(text: string): Array<{ cellId: string; newStatus: string; reason: string }> {
+function parseAnalysisOutput(text: string): AnalysisOutput[] {
   const match = text.match(/<ANALYSIS_RESULT>([\s\S]*?)<\/ANALYSIS_RESULT>/);
   if (!match || !match[1]) return [];
   try {
@@ -178,7 +187,7 @@ function parseAnalysisOutput(text: string): Array<{ cellId: string; newStatus: s
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (item: unknown): item is { cellId: string; newStatus: string; reason: string } =>
+      (item: unknown): item is AnalysisOutput =>
         typeof item === "object" &&
         item !== null &&
         "cellId" in item &&
@@ -332,12 +341,16 @@ export async function POST(req: Request): Promise<Response> {
       }, HEARTBEAT_MS);
 
       const sse = (payload: unknown) => {
-        controller.enqueue(sseEncode(encoder, payload));
-        // Persist every SSE event to DB for recovery
+        // 先持久化(独立 try),再 enqueue —— 确保 error/异常路径下事件不丢(运行中心可诊断)
         try {
           createRunEvent(db, run.id, (payload as { type: string }).type, payload);
         } catch {
           // DB write failure should not block the stream
+        }
+        try {
+          controller.enqueue(sseEncode(encoder, payload));
+        } catch {
+          // controller 已关闭(stream 中断),事件已落库不丢
         }
       };
 
@@ -416,7 +429,31 @@ async function runCellAnalysis(
     const fullText = collectedText.join("");
     const parsed = parseAnalysisOutput(fullText);
 
+    // 写回分析产出的分层归属(不论状态是否变更,implementation 是独立产出)
+    for (const item of parsed) {
+      if (!item.implementation) continue;
+      const cellInfo = cellsToAnalyze.find((c) => c.cellId === item.cellId);
+      if (!cellInfo) continue;
+      updateFeatureImplementation(db, cellInfo.feature.id, {
+        decider: item.implementation.decider ?? "",
+        acceptor: item.implementation.acceptor ?? "",
+        handler: item.implementation.handler ?? "",
+        actions: item.implementation.actions ? JSON.stringify(item.implementation.actions) : "",
+      });
+    }
+
     const results = buildAnalysisResults(parsed, cellsToAnalyze);
+
+    // apply 状态变更(降级重置语义)
+    for (const r of results) {
+      const existing = getCellRow(db, r.cellId);
+      if (!existing) continue;
+      updateFeatureScenarioStatus(db, r.featureId, r.scenarioName, r.newStatus);
+      if (existing.scenarioStatus === "已支持" && (r.newStatus === "需改造" || r.newStatus === "待实现")) {
+        updateCellAgentStatus(db, r.cellId, "not-started");
+      }
+    }
+
     updateRun(db, run.id, "done");
     sse({ type: "analyze-done", results, turns: nodeResult.turns, durationMs: nodeResult.durationMs });
   } catch (err) {
@@ -439,76 +476,114 @@ async function runBulkAnalysis(
 ): Promise<void> {
   sse({ type: "analyze-start", runId: run.id, totalCells: cellsToAnalyze.length, scope: "bulk", phase: "scan" });
 
-  // ---- Phase 1: Agent 扫描代码库 ----
-  const collectedText: string[] = [];
-  let scanSuccess = false;
-
+  // ---- Phase 1: 确定性脚本扫描(秒级,零 LLM 成本,不撞 turn) ----
+  let inventory: InventoryItem[] = [];
+  let scanDurationMs = 0;
+  let scanFallback = false;
+  const scanStart = Date.now();
   try {
-    const scanResult = await runNode({
-      cwd: sandboxPath,
-      systemPrompt: "You are a code scanner. Scan Java source files and produce a structured inventory. Use Glob **/src/main/java/**/*.java to find files. Handle both single-module and multi-module Maven projects. Be thorough — scan all packages.",
-      userPrompt: buildScanPrompt(),
-      allowedTools: ["Read", "Bash"],
-      maxTurns: 12,
-      onEvent: (event) => {
-        if (event.type === "assistant.text") {
-          collectedText.push(event.text);
-          sse({ type: "token", text: event.text });
-        } else if (event.type === "tool_use") {
-          sse({ type: "tool_use", name: event.name, input: event.input });
-        } else if (event.type === "tool_result") {
-          sse({ type: "tool_result", isError: event.isError, preview: event.preview });
-        }
-      },
-    });
+    inventory = scanJavaInventory(sandboxPath);
+    scanDurationMs = Date.now() - scanStart;
+  } catch (err) {
+    sse({ type: "scan-failed-script", message: err instanceof Error ? err.message : String(err) });
+  }
 
-    if (!scanResult.success) {
-      updateRun(db, run.id, "failed");
-      sse({ type: "error", message: scanResult.error ?? "Scan phase failed" });
+  // 脚本返回空 → 降级 LLM scan(runNode,maxTurns 20 + 自动续 session)
+  if (inventory.length === 0) {
+    sse({ type: "scan-fallback-llm", reason: "脚本 scan 返回空,降级 LLM 扫描" });
+    scanFallback = true;
+    const collectedText: string[] = [];
+    try {
+      const scanResult = await runNode({
+        cwd: sandboxPath,
+        systemPrompt: "You are a code scanner. Scan Java source files and produce a structured inventory. Use Glob to find **/src/main/java/**/*.java. Handle single-module and multi-module Maven projects. Be thorough.",
+        userPrompt: buildScanPrompt(),
+        allowedTools: ["Read", "Bash"],
+        maxTurns: 20,
+        onEvent: (event) => {
+          if (event.type === "assistant.text") { collectedText.push(event.text); sse({ type: "token", text: event.text }); }
+          else if (event.type === "tool_use") { sse({ type: "tool_use", name: event.name, input: event.input }); }
+          else if (event.type === "tool_result") { sse({ type: "tool_result", isError: event.isError, preview: event.preview }); }
+        },
+      });
+      scanDurationMs = Date.now() - scanStart;
+      if (!scanResult.success) {
+        updateRun(db, run.id, "failed");
+        sse({ type: "error", message: scanResult.error ?? "LLM scan fallback failed" });
+        return;
+      }
+      inventory = parseInventoryOutput(collectedText.join(""));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
+      sse({ type: "error", message });
       return;
     }
+  }
 
-    scanSuccess = true;
-    const inventory = parseInventoryOutput(collectedText.join(""));
+  // scan-done(脚本 inventory 缓存到 event,classify 复用)
+  sse({ type: "scan-done", inventory, scanDurationMs, fallback: scanFallback, inventorySize: inventory.length });
 
-    if (inventory.length === 0) {
-      // Inventory 解析失败 — fallback 到原有全量 prompt 方式
-      sse({ type: "scan-done", inventory: [], scanDurationMs: scanResult.durationMs, fallback: true });
-    } else {
-      sse({ type: "scan-done", inventory, scanDurationMs: scanResult.durationMs });
-    }
+  // inventory 仍空 → 最终降级全量 prompt
+  if (inventory.length === 0) {
+    await runFallbackBulkAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
+    return;
+  }
 
-    // ---- Phase 2: 轻量 LLM 分类 ----
-    if (inventory.length > 0) {
-      sse({ type: "classify-start", cellCount: cellsToAnalyze.length });
+  // ---- Phase 2: per-cell classify(拆分!每 cell 独立 run,故障隔离) ----
+  sse({ type: "classify-start", cellCount: cellsToAnalyze.length, perCell: true });
+  const allResults: AnalysisResult[] = [];
+  const classifySystemPrompt = "You are a precise status classifier. Based on the code inventory, classify the cell's implementation status. Output ONLY the JSON array wrapped in <ANALYSIS_RESULT> tags, nothing else.";
+
+  for (const cell of cellsToAnalyze) {
+    // 每 cell 独立 analyze run(真实 cellId,运行中心逐 cell 可观测)
+    let cellRun: { id: string } | null = null;
+    try {
+      cellRun = createRun(db, cell.cellId, "analyze");
+      sse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id });
 
       const classifyResult = await runClassify({
         cwd: sandboxPath,
-        systemPrompt: "You are a precise status classifier. Based on the code inventory, classify each cell's implementation status. Output ONLY the JSON array wrapped in tags, nothing else.",
-        userPrompt: buildClassifyPrompt(inventory, cellsToAnalyze),
-        maxTokens: 4096,
+        systemPrompt: classifySystemPrompt,
+        userPrompt: buildClassifyPrompt(inventory, [cell]),
       });
-
       const parsed = parseAnalysisOutput(classifyResult.text);
-      const results = buildAnalysisResults(parsed, cellsToAnalyze);
 
-      updateRun(db, run.id, "done");
-      sse({
-        type: "analyze-done",
-        results,
-        scanDurationMs: scanResult.durationMs,
-        classifyDurationMs: classifyResult.durationMs,
-        inventorySize: inventory.length,
-      });
-    } else {
-      // Fallback: inventory 为空，用原有全量 prompt 方式
-      await runFallbackBulkAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
+      // 写回分层归属(独立于状态变更)
+      for (const item of parsed) {
+        if (!item.implementation) continue;
+        updateFeatureImplementation(db, cell.feature.id, {
+          decider: item.implementation.decider ?? "",
+          acceptor: item.implementation.acceptor ?? "",
+          handler: item.implementation.handler ?? "",
+          actions: item.implementation.actions ? JSON.stringify(item.implementation.actions) : "",
+        });
+      }
+
+      const results = buildAnalysisResults(parsed, [cell]);
+
+      // apply 状态变更
+      for (const r of results) {
+        const existing = getCellRow(db, r.cellId);
+        if (!existing) continue;
+        updateFeatureScenarioStatus(db, r.featureId, r.scenarioName, r.newStatus);
+        if (existing.scenarioStatus === "已支持" && (r.newStatus === "需改造" || r.newStatus === "待实现")) {
+          updateCellAgentStatus(db, r.cellId, "not-started");
+        }
+      }
+      allResults.push(...results);
+      updateRun(db, cellRun.id, "done");
+      sse({ type: "classify-cell-done", cellId: cell.cellId, runId: cellRun.id, results, durationMs: classifyResult.durationMs });
+    } catch (err) {
+      // 单 cell 失败不影响其他 cell(故障隔离)
+      const message = err instanceof Error ? err.message : String(err);
+      if (cellRun) { try { updateRun(db, cellRun.id, "failed"); } catch { /* ignore */ } }
+      sse({ type: "classify-cell-failed", cellId: cell.cellId, message });
     }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
-    sse({ type: "error", message });
   }
+
+  updateRun(db, run.id, "done");
+  sse({ type: "analyze-done", results: allResults, scanDurationMs, inventorySize: inventory.length, perCell: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -565,25 +640,22 @@ async function runFallbackBulkAnalysis(
 
 function buildCellAnalysisPrompt(cells: CellInfo[]): string {
   const lines = cells.map((c) => {
-    const handler = c.feature.target.handler || "(无)";
-    const actions = c.feature.target.actions.length > 0 ? c.feature.target.actions.join(", ") : "(无)";
-    return `- cellId: ${c.cellId} | feature: ${c.feature.name} | scenario: ${c.scenario.name} | handler: ${handler} | actions: ${actions} | currentStatus: ${c.scenario.status}`;
+    return `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
   });
 
   return `## 任务
 
-你是 HelmFlow 状态分析器。请分析当前项目的代码,判断以下每个格子(feature × scenario)的实现状态。
+你是 HelmFlow 状态分析器。请分析当前项目的代码,判断以下每个格子(feature × scenario)的实现状态,并匹配 DDD 分层归属。
 
 分析维度:
-1. 扫描 target.handler 对应的 Java 类是否存在(在 src/main/java 下)
-2. 扫描 target.actions 对应的 Java 类是否存在
-3. 如果类存在,分析代码逻辑是否完整覆盖该功能(vs 只是骨架/占位/TODO)
-4. 如果 currentStatus 是"废弃",保持不动
+1. 扫描 src/main/java 下该功能对应的 Decider/Acceptor/Handler/Action 类是否存在
+2. 如果类存在,分析代码逻辑是否完整覆盖该功能(vs 只是骨架/占位/TODO)
+3. 如果 currentStatus 是"废弃",保持不动
 
 判断规则:
-- 类存在且逻辑完整 → "已支持"
-- 类存在但逻辑不完整或不适配 → "需改造"
-- 类不存在 → "待实现"
+- Handler + 主要 Actions 都存在且逻辑完整 → "已支持"
+- 类存在但逻辑不完整或骨架 → "需改造"
+- 关键类不存在 → "待实现"
 - currentStatus 为"废弃" → 保持"废弃"
 
 ## 待分析格子
@@ -592,19 +664,23 @@ ${lines.join("\n")}
 
 ## 输出格式
 
-请输出 JSON 数组,每个元素:
-\`\`\`json
+用 \`<ANALYSIS_RESULT>\` 和 \`</ANALYSIS_RESULT>\` 标签包裹 JSON 数组,含匹配到的分层链路:
+
+\`\`\`
+<ANALYSIS_RESULT>
 [
-  {"cellId": "D-01__正式签约", "newStatus": "已支持", "reason": "SaveDeliverRecordHandler 类存在且逻辑完整"},
+  {"cellId": "D-01__正式签约", "newStatus": "已支持", "reason": "SaveDeliverRecordHandler 类存在且逻辑完整",
+   "implementation": {"decider":"DeliverDecider","acceptor":"DeliverRecordAcceptor","handler":"SaveDeliverRecordHandler","actions":["SaveDeliverRecordAction"]}},
   ...
 ]
+</ANALYSIS_RESULT>
 \`\`\`
 
-只输出 JSON 数组,不要其他内容。用 \`<ANALYSIS_RESULT>\` 和 \`</ANALYSIS_RESULT>\` 标签包裹。`;
+只输出 JSON 数组(带标签)。implementation:匹配到的类名填,没匹配留空对象。`;
 }
 
 function buildAnalysisResults(
-  parsed: Array<{ cellId: string; newStatus: string; reason: string }>,
+  parsed: AnalysisOutput[],
   cellsToAnalyze: CellInfo[],
 ): AnalysisResult[] {
   const results: AnalysisResult[] = [];
@@ -620,6 +696,7 @@ function buildAnalysisResults(
       oldStatus,
       newStatus: item.newStatus,
       reason: item.reason,
+      implementation: item.implementation,
     });
   }
   return results;

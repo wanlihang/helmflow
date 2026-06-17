@@ -21,6 +21,7 @@
     "@helmflow/agent-runner": "workspace:*",
     "@helmflow/agent-core": "workspace:*",
     "@helmflow/contract-schema": "workspace:*",
+    "@helmflow/helmcode-manager": "workspace:*",
     "@helmflow/sandbox-worktree": "workspace:*",
     "yaml": "2.6.1"
   },

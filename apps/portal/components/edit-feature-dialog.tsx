@@ -29,23 +29,17 @@ export function EditFeatureDialog({
   const [error, setError] = useState("");
 
   const [name, setName] = useState(feature.name);
-  const [handler, setHandler] = useState(feature.target.handler);
-  const [actions, setActions] = useState(feature.target.actions.join(", "));
-  const [context, setContext] = useState(feature.target.context);
+  const [handler, setHandler] = useState(feature.implementation.handler);
+  const [actions, setActions] = useState(feature.implementation.actions.join(", "));
+  const [context, setContext] = useState(feature.implementation.context);
   const [priority, setPriority] = useState<FeaturePriority>(feature.priority);
-  const [legacyFlowCode, setLegacyFlowCode] = useState(feature.legacy.flowCode);
-  const [legacyActivities, setLegacyActivities] = useState(
-    feature.legacy.activities.join(", "),
-  );
 
   useEffect(() => {
     setName(feature.name);
-    setHandler(feature.target.handler);
-    setActions(feature.target.actions.join(", "));
-    setContext(feature.target.context);
+    setHandler(feature.implementation.handler);
+    setActions(feature.implementation.actions.join(", "));
+    setContext(feature.implementation.context);
     setPriority(feature.priority);
-    setLegacyFlowCode(feature.legacy.flowCode);
-    setLegacyActivities(feature.legacy.activities.join(", "));
   }, [feature]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -66,8 +60,6 @@ export function EditFeatureDialog({
           actions,
           context,
           priority,
-          legacyFlowCode,
-          legacyActivities,
         }),
       });
       if (!res.ok) {
@@ -138,24 +130,6 @@ export function EditFeatureDialog({
               type="text"
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Legacy FlowCode</label>
-            <input
-              type="text"
-              value={legacyFlowCode}
-              onChange={(e) => setLegacyFlowCode(e.target.value)}
-              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Legacy Activities (逗号分隔)</label>
-            <input
-              type="text"
-              value={legacyActivities}
-              onChange={(e) => setLegacyActivities(e.target.value)}
               className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
             />
           </div>

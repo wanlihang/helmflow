@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { createScenarioManual, getFeatureRow } from "@helmflow/storage";
-import { resetMatrixSyncFlag } from "@/lib/sync-matrix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +42,6 @@ export async function POST(req: Request, ctx: RouteContext): Promise<Response> {
       scenarioName,
       scenarioStatus,
     });
-    resetMatrixSyncFlag();
     return NextResponse.json({ scenario }, { status: 201 });
   } catch (err) {
     const msg = (err as Error).message;

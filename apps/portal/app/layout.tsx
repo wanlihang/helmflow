@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ProjectSwitcher } from "@/components/project-switcher";
+import { RunningBadge } from "@/components/running-badge";
 import { getCurrentProjectId, getProjectList } from "@/lib/project";
 import "./globals.css";
 
@@ -26,10 +27,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 currentProjectId={currentProjectId}
               />
             </div>
-            <nav className="text-sm text-muted-foreground">
+            <nav className="flex items-center gap-4 text-sm text-muted-foreground">
               <a className="hover:text-foreground" href="/">
                 全景
               </a>
+              <a className="hover:text-foreground" href="/contract-sync">
+                契约同步
+              </a>
+              <a className="hover:text-foreground" href="/helmcode">
+                标准版本
+              </a>
+              <RunningBadge />
             </nav>
           </div>
         </header>

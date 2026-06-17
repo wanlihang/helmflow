@@ -1,9 +1,15 @@
 // runtime env 装配:Portal 用 HELMFLOW_ANTHROPIC_* 命名以避免污染外层 ANTHROPIC_*,
 // 这里把它们映射回 Agent SDK 期望的 ANTHROPIC_* + 强制注入两个固定 flag:
-//  - ANTHROPIC_MODEL=glm-5.1
+//  - ANTHROPIC_MODEL=glm-5.2
 //  - CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1(智谱 baseURL 下 tool_use 兼容性要求)
+//
+// 认证方式说明:
+//  - 官方 api.anthropic.com 端点:密钥通过 x-api-key 头传递 → 对应 ANTHROPIC_API_KEY
+//  - 第三方 Anthropic 兼容端点(如智谱 open.bigmodel.cn/api/anthropic):密钥须通过
+//    Authorization: Bearer 头传递 → 对应 ANTHROPIC_AUTH_TOKEN
+//  因此检测到非官方 baseURL 时,把 apiKey 自动降级为 authToken,避免 401 无效的 AuthKey。
 
-const FIXED_MODEL = "glm-5.1";
+const FIXED_MODEL = "glm-5.2";
 
 export interface RunnerEnv {
   ANTHROPIC_API_KEY?: string;
@@ -11,6 +17,11 @@ export interface RunnerEnv {
   ANTHROPIC_BASE_URL?: string;
   ANTHROPIC_MODEL: string;
   CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: string;
+}
+
+function isOfficialAnthropicBase(baseURL?: string): boolean {
+  if (!baseURL) return true; // 未设 baseURL 走官方默认
+  return /(^|\.)anthropic\.com$/i.test(baseURL);
 }
 
 export function buildRunnerEnv(): RunnerEnv {
@@ -28,12 +39,19 @@ export function buildRunnerEnv(): RunnerEnv {
     );
   }
 
+  const official = isOfficialAnthropicBase(baseURL);
+  // 第三方端点用 Bearer(authToken)方式;若只配了 apiKey,自动转成 authToken。
+  const effectiveAuthToken =
+    authToken || (official ? undefined : apiKey);
+  // 官方端点保留 x-api-key(apiKey)方式;第三方端点不设 apiKey 以免 SDK 同时发出 x-api-key 头。
+  const effectiveApiKey = official ? apiKey : undefined;
+
   const env: RunnerEnv = {
     ANTHROPIC_MODEL: FIXED_MODEL,
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
   };
-  if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-  if (authToken) env.ANTHROPIC_AUTH_TOKEN = authToken;
+  if (effectiveApiKey) env.ANTHROPIC_API_KEY = effectiveApiKey;
+  if (effectiveAuthToken) env.ANTHROPIC_AUTH_TOKEN = effectiveAuthToken;
   if (baseURL) env.ANTHROPIC_BASE_URL = baseURL;
   return env;
 }

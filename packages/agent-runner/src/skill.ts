@@ -47,6 +47,10 @@ export function resolveSkillPath(
  * 解析 skill 运行时需要的 additionalDirectories。
  * HelmCode skill 会引用 core/<skill>/references/ 和 standards/,
  * 需要加入 Agent SDK 的可访问目录列表。
+ *
+ * @deprecated 控制平面回归第三刀:新代码改用 @helmflow/helmcode-manager 的
+ *   HelmcodeManager.resolveSkillAdditionalDirs()(收敛到 preset 精确目录 + 带版本戳)。
+ *   本函数仅保留向后兼容(deploy 等 HelmFlow 本地 skill 仍用 loadSkillBody)。
  */
 export function resolveSkillAdditionalDirs(
   skillName: string,

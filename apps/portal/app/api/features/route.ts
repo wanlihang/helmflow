@@ -5,7 +5,6 @@ import {
   createScenarioManual,
   upsertFeatureScenario,
 } from "@helmflow/storage";
-import { resetMatrixSyncFlag } from "@/lib/sync-matrix";
 import { getCurrentProjectId } from "@/lib/project";
 
 export const runtime = "nodejs";
@@ -43,8 +42,6 @@ export async function POST(req: Request): Promise<Response> {
   const actions = typeof body.actions === "string" ? body.actions : "";
   const context = typeof body.context === "string" ? body.context : "";
   const priority = typeof body.priority === "string" ? body.priority : "";
-  const legacyFlowCode = typeof body.legacyFlowCode === "string" ? body.legacyFlowCode : "";
-  const legacyActivities = typeof body.legacyActivities === "string" ? body.legacyActivities : "";
 
   const projectId = typeof body.projectId === "string" ? body.projectId : "";
 
@@ -59,8 +56,6 @@ export async function POST(req: Request): Promise<Response> {
       actions,
       context,
       priority,
-      legacyFlowCode,
-      legacyActivities,
     });
 
     // 创建默认场景
@@ -107,7 +102,6 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // 清除 matrix sync 标记使下次加载时刷新
-    resetMatrixSyncFlag();
 
     return NextResponse.json({ feature }, { status: 201 });
   } catch (err) {

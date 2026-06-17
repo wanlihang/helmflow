@@ -5,11 +5,10 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Contract } from "@helmflow/contract-schema";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
-  loadSkillBody,
-  resolveSkillAdditionalDirs,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
@@ -66,20 +65,18 @@ function ensureSandboxGitInit(sandboxPath: string): void {
   );
 }
 
-function resolveStandardsRoot(): string {
-  const env = process.env.HELMFLOW_JAVA_DDD_STANDARDS;
-  if (env && env.length > 0) return resolve(env);
-  return resolve(process.cwd(), "..", "..", "standards", "java-ddd", "patterns");
-}
-
 export async function runCodeNode(args: RunCodeNodeArgs): Promise<NodeRunnerResult> {
-  const systemPrompt = loadSkillBody("implement", args.helmcodeRoot);
-  const skillAdditionalDirs = resolveSkillAdditionalDirs("implement", args.helmcodeRoot);
+  const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const versionInfo = manager?.getVersion();
+  const systemPrompt = manager ? manager.loadSkillBody("implement") : "";
+  // patterns + skill references + standards,统一走 manager(替代硬编码 resolveStandardsRoot)
+  const allAdditionalDirs = manager
+    ? [manager.resolvePatterns(), ...manager.resolveSkillAdditionalDirs("implement")]
+    : [];
   ensureSandboxGitInit(args.sandboxPath);
-  const standardsRoot = resolveStandardsRoot();
 
   const run = createRun(args.db, args.cellId, "code");
-  const attempt = createAttempt(args.db, run.id, "code", args.iteration, "running");
+  const attempt = createAttempt(args.db, run.id, "code", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const reflectionAppendix = buildReflectionAppendix(args.reflections ?? []);
   const fixTaskAppendix = buildFixTaskAppendix(args.fixTasks ?? []);
@@ -106,8 +103,6 @@ ${fixTaskAppendix}${reflectionAppendix}
 4. 如有决策,产出 judgment-log (JD-NNN)
 5. implement 内置 verify 自愈:编译/测试失败时自动修复
 `;
-
-  const allAdditionalDirs = [standardsRoot, ...skillAdditionalDirs];
 
   try {
     const nodeResult = await runNode({

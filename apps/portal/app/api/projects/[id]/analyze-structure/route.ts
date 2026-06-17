@@ -124,7 +124,6 @@ export async function POST(
         }, HEARTBEAT_INTERVAL_MS);
 
         const sse = (payload: unknown) => {
-          controller.enqueue(sseEncode(encoder, payload));
           try {
             createRunEvent(
               db,
@@ -134,6 +133,11 @@ export async function POST(
             );
           } catch {
             // DB 写入失败不应阻塞流
+          }
+          try {
+            controller.enqueue(sseEncode(encoder, payload));
+          } catch {
+            // controller 已关闭,事件已落库不丢
           }
         };
 

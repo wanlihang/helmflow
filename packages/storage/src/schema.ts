@@ -1,7 +1,8 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 // ---------------------------------------------------------------------------
-// features — 功能点元数据(分组维度,不再承载 agent status)
+// features — 功能点元数据(分组维度,不承载 agent status)
+// handler/actions/context = 实现定位锚点(implementation),非"重构目标"。
 // ---------------------------------------------------------------------------
 export const features = sqliteTable("features", {
   id: text("id").primaryKey(),
@@ -13,8 +14,12 @@ export const features = sqliteTable("features", {
   handler: text("handler").notNull().default(""),
   actions: text("actions").notNull().default(""),
   context: text("context").notNull().default(""),
+  decider: text("decider").notNull().default(""),
+  acceptor: text("acceptor").notNull().default(""),
   priority: text("priority").notNull().default(""),
+  /** @deprecated 旧"重构"语境残留(legacy 旧实现)。新模型已去 legacy/target 二元,不再读取/写入。保留列仅为历史可追溯。 */
   legacyFlowCode: text("legacy_flow_code").notNull().default(""),
+  /** @deprecated 同上 */
   legacyActivities: text("legacy_activities").notNull().default(""),
   updatedAt: text("updated_at").notNull(),
 });
@@ -66,6 +71,9 @@ export const nodeAttempts = sqliteTable("node_attempts", {
   outputPath: text("output_path"),
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at"),
+  // 控制平面回归第三刀:记录本次 attempt 用的 HelmCode 标准版本(可追溯)
+  standardsVersion: text("standards_version"),
+  standardsChecksum: text("standards_checksum"),
 });
 
 // ---------------------------------------------------------------------------
@@ -81,6 +89,10 @@ export const contracts = sqliteTable("contracts", {
   contentHash: text("content_hash").notNull(),
   createdAt: text("created_at").notNull(),
   approvedAt: text("approved_at"),
+  // 控制平面回归追加列(DDL 幂等 ALTER 在 db.ts;第一刀不写入,为第二刀铺路)
+  source: text("source").notNull().default("clarifier"),
+  projectId: text("project_id").notNull().default(""),
+  originPath: text("origin_path").notNull().default(""),
 });
 
 // ---------------------------------------------------------------------------
@@ -183,7 +195,100 @@ export const projects = sqliteTable("projects", {
   manifestPath: text("manifest_path").notNull(),
   status: text("status").notNull().default("active"),
   registeredAt: integer("registered_at", { mode: "timestamp" }).notNull(),
+  // 控制平面回归第三刀:项目当前绑定的 HelmCode 标准版本(per-project 版本感知)
+  helmcodeVersion: text("helmcode_version"),
+  standardsChecksum: text("standards_checksum"),
 });
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectInsert = typeof projects.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// contract_sync_results — 契约状态同步引擎扫描快照(每次扫描 upsert,幂等)
+//   一个目标项目契约(HelmCode F-ID)→ HelmFlow matrix cell 的匹配结果
+// ---------------------------------------------------------------------------
+export const contractSyncResults = sqliteTable("contract_sync_results", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  contractFeatureId: text("contract_feature_id").notNull(),
+  state: text("state").notNull(), // matched | pending | unmatched
+  confidence: real("confidence").notNull(),
+  chosenCellId: text("chosen_cell_id"),
+  mappedFeatureId: text("mapped_feature_id"),
+  mappedScenarioName: text("mapped_scenario_name"),
+  helmcodeStatus: text("helmcode_status").notNull(), // done|approved|goal-running|draft
+  targetScenarioStatus: text("target_scenario_status"), // 已支持|需改造|待实现
+  candidatesJson: text("candidates_json").notNull().default("[]"),
+  reasonsJson: text("reasons_json").notNull().default("[]"),
+  scannedAt: text("scanned_at").notNull(),
+});
+
+export type ContractSyncResultRow = typeof contractSyncResults.$inferSelect;
+export type ContractSyncResultInsert = typeof contractSyncResults.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// contract_cell_mappings — 人工维护的"契约 Feature ID ↔ matrix cell"映射
+//   HelmCode 用 F001-name,HelmFlow matrix 用 D-01;此表由 HelmFlow(控制平面)维护,
+//   HelmCode 侧无感知。是启发式匹配的"确定解"覆盖层。
+// ---------------------------------------------------------------------------
+export const contractCellMappings = sqliteTable("contract_cell_mappings", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  contractFeatureId: text("contract_feature_id").notNull(),
+  featureId: text("feature_id").notNull(),
+  scenarioName: text("scenario_name").notNull(),
+  note: text("note").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+export type ContractCellMappingRow = typeof contractCellMappings.$inferSelect;
+export type ContractCellMappingInsert = typeof contractCellMappings.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// standards_migrations — HelmCode 标准版本切换审计(控制平面回归第四刀)
+//   每次 adopt(用户手动 git 切换后采纳)/rollback 都新增一行,不删旧(可追溯)。
+//   直接读源架构:HelmFlow 不写文件,本表是版本切换的唯一历史凭证。
+// ---------------------------------------------------------------------------
+export const standardsMigrations = sqliteTable("standards_migrations", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  fromChecksum: text("from_checksum"),
+  toChecksum: text("to_checksum").notNull(),
+  fromGitHead: text("from_git_head"),
+  toGitHead: text("to_git_head"),
+  action: text("action").notNull(), // adopt | rollback
+  changedFilesJson: text("changed_files_json").notNull().default("[]"),
+  affectedCount: integer("affected_count").notNull().default(0),
+  operator: text("operator").notNull().default("portal"),
+  createdAt: text("created_at").notNull(),
+});
+
+export type StandardsMigrationRow = typeof standardsMigrations.$inferSelect;
+export type StandardsMigrationInsert = typeof standardsMigrations.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// pipeline_queue — 常驻 worker 的执行队列(7×24 自主开发能力)
+//   每个 approved 契约 → 一条队列项。worker 认领 pending→running,执行 runOrchestrator
+//   后落 done/blocked。attempt 计的是进程崩溃导致的重跑(非业务重试),达 maxAttempts 转 blocked。
+// ---------------------------------------------------------------------------
+export const pipelineQueue = sqliteTable("pipeline_queue", {
+  id: text("id").primaryKey(),
+  cellId: text("cell_id")
+    .notNull()
+    .references(() => featureScenarios.id),
+  contractId: text("contract_id")
+    .notNull()
+    .references(() => contracts.id),
+  state: text("state").notNull(), // pending | running | done | failed | blocked
+  priority: integer("priority").notNull().default(0),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  claimedBy: text("claimed_by"),
+  claimedAt: text("claimed_at"),
+  lastError: text("last_error").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type PipelineQueueRow = typeof pipelineQueue.$inferSelect;
+export type PipelineQueueInsert = typeof pipelineQueue.$inferInsert;
