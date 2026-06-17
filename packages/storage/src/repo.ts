@@ -854,7 +854,9 @@ export function enqueueIfAbsent(db: DB, args: EnqueueArgs): PipelineQueueRow | n
       .where(
         and(
           eq(pipelineQueue.cellId, args.cellId),
-          inArray(pipelineQueue.state, ["pending", "running"]),
+          // pending/running=进行中;blocked/failed=已失败待人工。任一存在都不重新入队,
+          // 否则业务失败的 cell 会被 scan 无限重新入队 → 死循环空转。
+          inArray(pipelineQueue.state, ["pending", "running", "blocked", "failed"]),
         ),
       )
       .limit(1)
@@ -1024,6 +1026,26 @@ export function sumNodeDoneCostSince(db: DB, sinceIso: string): number {
 /** 入队扫描用:所有 status=approved 的契约。 */
 export function listApprovedContracts(db: DB): ContractRow[] {
   return db.select().from(contracts).where(eq(contracts.status, "approved")).all();
+}
+
+/** 清理指定 cell 处于终态(blocked/failed/done)的队列项(人工重置/重试用)。返回删除行数。 */
+export function clearTerminalQueueForCell(db: DB, cellId: string): number {
+  const result = db
+    .delete(pipelineQueue)
+    .where(
+      and(
+        eq(pipelineQueue.cellId, cellId),
+        inArray(pipelineQueue.state, ["blocked", "failed", "done"]),
+      ),
+    )
+    .run();
+  return result.changes;
+}
+
+/** 清理指定 cell 的所有队列项(任意状态)。验证/彻底重置用。返回删除行数。 */
+export function clearAllQueueForCell(db: DB, cellId: string): number {
+  const result = db.delete(pipelineQueue).where(eq(pipelineQueue.cellId, cellId)).run();
+  return result.changes;
 }
 
 // ---------------------------------------------------------------------------

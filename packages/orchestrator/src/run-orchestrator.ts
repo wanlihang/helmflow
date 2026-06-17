@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { parseContract, type Contract } from "@helmflow/contract-schema";
 import {
   createFixTask,
@@ -76,7 +76,12 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
 
   let contractMarkdown: string;
   try {
-    contractMarkdown = readFileSync(join(portalCwd, contractRow.markdownPath), "utf-8");
+    // 兼容绝对路径(目标项目 HelmCode 导入契约)与相对路径(基于 portalCwd)。
+    // 注意 node path.join 对绝对第二参当相对拼接,必须显式判断。
+    const contractPath = isAbsolute(contractRow.markdownPath)
+      ? contractRow.markdownPath
+      : join(portalCwd, contractRow.markdownPath);
+    contractMarkdown = readFileSync(contractPath, "utf-8");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     emit({ type: "error", message: `Failed to read contract: ${message}` });

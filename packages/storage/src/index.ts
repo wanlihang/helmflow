@@ -147,4 +147,6 @@ export {
   countQueueByState,
   sumNodeDoneCostSince,
   listApprovedContracts,
+  clearTerminalQueueForCell,
+  clearAllQueueForCell,
 } from "./repo";
