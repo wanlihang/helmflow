@@ -34,7 +34,7 @@
 
 ```yaml
 schemaVersion: 1
-featureId: F-005-forward-deliver-record
+featureId: F005-forward-deliver-record
 status: draft | approved | goal-running | done | blocked | abandoned
 project: mycmdeliverhub
 createdAt: 2026-06-03T10:30:00Z
@@ -85,11 +85,11 @@ const checks = [
 
 ```yaml
 contract:
-  $ref: .claude/contracts/F-005-forward-deliver-record.md
+  $ref: .claude/contracts/F005-forward-deliver-record.md
   status: approved
 fixTask:
   schemaVersion: 1
-  featureId: F-005-forward-deliver-record
+  featureId: F005-forward-deliver-record
   issuedBy: qa-tester
   failedAcId: AC-003
   expectedBehavior: |
@@ -123,7 +123,7 @@ fixTask:
 
 ```yaml
 schemaVersion: 1
-featureId: F-005-forward-deliver-record
+featureId: F005-forward-deliver-record
 mappings:
   - acId: AC-001
     tests:
@@ -164,7 +164,7 @@ mappings:
 
 ```yaml
 schemaVersion: 1
-featureId: F-005-forward-deliver-record
+featureId: F005-forward-deliver-record
 runAt: 2026-06-03T11:45:00Z
 strict:
   archRules: { passed: 8, failed: 0 }
@@ -262,7 +262,7 @@ QA-Report: .claude/orchestration/{F-ID}/runs/{run-id}/qa-report.yaml
 
 ```yaml
 schemaVersion: 1
-featureId: F-005-forward-deliver-record
+featureId: F005-forward-deliver-record
 reflections:
   - id: REF-001
     occurredAt: 2026-06-03T10:35:00Z
@@ -362,7 +362,7 @@ draft ──────────► clarified ──review──► approved
 ### 4.3 持久化文件(每个 run 一份)
 
 ```
-.claude/orchestration/F-005-forward-deliver-record/
+.claude/orchestration/F005-forward-deliver-record/
 ├── run-001-2026-06-03.yaml          # 主 state 文件
 ├── reflections.yaml                  # 跨 run 累积(同 feature 下)
 └── runs/
@@ -452,7 +452,7 @@ async function runWithIsolatedCritic(workerOutput: NodeOutput) {
 ```yaml
 escalation:
   reason: coder-refine-exhausted
-  feature: F-005
+  feature: F005
   iterations: 5
   lastFailure:
     critic: arch-rules

@@ -31,9 +31,9 @@
 
 | 维度 | 原设计 | 当前实现 | 后果 |
 |---|---|---|---|
-| **契约存哪** | 目标项目 `.claude/contracts/F-005-...md` | HelmFlow 自己 `apps/portal/data/contracts/` | 两条开发路径产物分叉,永远对不上 |
+| **契约存哪** | 目标项目 `.claude/contracts/F005-...md` | HelmFlow 自己 `apps/portal/data/contracts/` | 两条开发路径产物分叉,永远对不上 |
 | **矩阵存哪** | 目标项目 `.claude/matrix/feature-matrix.yaml` | HelmFlow 自己 `data/feature-matrix.yaml` | 项目与它的"功能地图"分离 |
-| **Feature ID** | **双 ID**:`features.id=F-005`(HelmCode)+ `matrixCellId=D-05`(业务) | 只有 cellId(D-01__正式签约),无 F-005 层 | Feature ID 映射本无难题,原设计早已用双 ID 解决 |
+| **Feature ID** | **双 ID**:`features.id=F005`(HelmCode)+ `matrixCellId=D-05`(业务) | 只有 cellId(D-01__正式签约),无 F005 层 | Feature ID 映射本无难题,原设计早已用双 ID 解决 |
 | **status** | **派生**,由 status-derivation 实时从 contracts+runs 推导(§7:"status 字段不存在") | 直接存在 `feature_scenarios.scenarioStatus` | 必然 drift — 产物变了状态不跟,即"导入"需求之根 |
 | **契约格式** | 复用 HelmCode clarify 的 9 章节 | 自创简化 6 章节 ContractSchema | 标准 drift(`helmcode-management-goals.md` 要根治的同一类病) |
 | **Clarifier** | 用 HelmCode clarify skill 产出 | 借 skill 的壳,却用简化 schema 校验、写自己仓库 | 半吊子,格式对不齐 |
@@ -54,7 +54,7 @@
 
 1. **产物锚定目标项目**:契约写 `.claude/contracts/`、矩阵读 `.claude/matrix/`。HelmFlow 的 `data/contracts/` 降级为只读缓存或废弃。
 2. **状态由产物同步**:保留 `scenarioStatus` 存储(派生每次算太贵),但加"从产物回写"的同步通道:`扫描契约 status(done) → 更新 scenarioStatus(已支持)`。
-3. **双 ID 打通**:features 加 HelmCode 风格 featureId(F-005),保留 matrixCellId(D-05)作业务标识,二者靠契约字段或 registry 映射。
+3. **双 ID 打通**:features 加 HelmCode 风格 featureId(F005),保留 matrixCellId(D-05)作业务标识,二者靠契约字段或 registry 映射。
 
 ---
 

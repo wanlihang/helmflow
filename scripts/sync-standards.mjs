@@ -45,7 +45,7 @@ function checksumDir(dir) {
   return h.digest("hex");
 }
 
-function main() {
+async function main() {
   const errors = [];
   let checked = 0;
 
@@ -87,6 +87,22 @@ function main() {
       continue;
     }
 
+    // 跨包校验:调 helmcode api.mjs.checksum(单一事实源)对比本脚本自算,防 drift。
+    // 真正消费 HelmCode programmatic API —— 若 helmcode 改了 checksum 算法,此处 fail。
+    try {
+      const helmcodeApi = await import(join(helmcodeRoot, "api.mjs"));
+      if (typeof helmcodeApi.checksum === "function") {
+        const apiChecksum = helmcodeApi.checksum(join(helmcodeRoot, "standards", preset));
+        if (apiChecksum !== checksum) {
+          errors.push(`${entry}: checksum 漂移 — 本脚本 ${checksum.slice(0, 12)}… vs helmcode api.mjs ${apiChecksum.slice(0, 12)}… (单一事实源: helmcode api.mjs)`);
+        } else {
+          console.log(`[helmcode:check] ${entry}: 跨包校验 ✓ helmcode api.mjs.checksum 一致`);
+        }
+      }
+    } catch (err) {
+      console.log(`[helmcode:check] ${entry}: helmcode api.mjs 不可达,跳过跨包校验 — ${err.message}`);
+    }
+
     checked++;
     console.log(`[helmcode:check] ${entry}: OK - helmcode ${manifest.helmcode?.version ?? "?"} / ${preset} / ${checksum.slice(0, 16)}…`);
   }
@@ -100,4 +116,7 @@ function main() {
   console.log(`\n[helmcode:check] ✓ 校验通过(${checked} 个项目配置可达,checksum 可算)。`);
 }
 
-main();
+main().catch((err) => {
+  console.error(`[helmcode:check] 异常: ${err.message}`);
+  process.exit(1);
+});

@@ -58,12 +58,12 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
   const { db, contractId, sandboxPath, portalCwd, superRunId, helmcodeRoot, emit: rawEmit } = opts;
 
   function emit(event: OrchestratorEvent): void {
-    if (event.type !== "node-event") {
-      try {
-        createRunEvent(db, superRunId, event.type, event);
-      } catch {
-        // DB write failure should not block orchestration
-      }
+    // 所有事件(含 node-event)都持久化到父 run,使 worker 触发 / portal 重启后
+    // 走 DB 轮询的客户端仍能看到各节点的 agent 对话(token/tool_use/tool_result)。
+    try {
+      createRunEvent(db, superRunId, event.type, event);
+    } catch {
+      // DB write failure should not block orchestration
     }
     rawEmit(event);
   }

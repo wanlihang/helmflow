@@ -235,7 +235,7 @@ packages/sandbox/
 const sandbox = await createSandbox({
   type: 'docker',
   image: 'helmflow/java-ddd-sofa-21:latest',
-  worktree: { repo: '/path/to/mycmdeliverhub', branch: 'feature/F-005' },
+  worktree: { repo: '/path/to/mycmdeliverhub', branch: 'feature/F005' },
   caches: ['.m2', '.gradle'],
 });
 
@@ -347,7 +347,7 @@ apps/cli/
 │   │   ├── version.ts
 │   │   ├── matrix/
 │   │   │   ├── status.ts             # 全景状态推导
-│   │   │   ├── work.ts               # helmcode matrix work F-005
+│   │   │   ├── work.ts               # helmcode matrix work F005
 │   │   │   └── render.ts
 │   │   └── orchestrate.ts            # 启动 orchestrator
 │   ├── index.ts

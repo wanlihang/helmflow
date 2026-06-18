@@ -138,7 +138,7 @@ export const projects = sqliteTable('projects', {
 
 // packages/storage/src/schema/features.ts
 export const features = sqliteTable('features', {
-  id: text('id').primaryKey(),                  // F-005-forward-deliver-record
+  id: text('id').primaryKey(),                  // F005-forward-deliver-record
   projectId: text('project_id').references(() => projects.id),
   matrixCellId: text('matrix_cell_id'),         // D-05
   domain: text('domain').notNull(),             // deliver | mapping | pricing | ...
@@ -155,7 +155,7 @@ export const contracts = sqliteTable('contracts', {
   id: text('id').primaryKey(),
   featureId: text('feature_id').references(() => features.id),
   status: text('status').notNull(),             // draft | approved | goal-running | done | blocked | abandoned
-  filePath: text('file_path').notNull(),        // .claude/contracts/F-005-...md
+  filePath: text('file_path').notNull(),        // .claude/contracts/F005-...md
   contentHash: text('content_hash').notNull(),
   approvedBy: text('approved_by'),
   approvedAt: integer('approved_at', { mode: 'timestamp' }),
@@ -181,7 +181,7 @@ export const nodeAttempts = sqliteTable('node_attempts', {
   runId: text('run_id').references(() => orchestrationRuns.id),
   nodeName: text('node_name').notNull(),        // clarifier | coder | ...
   iteration: integer('iteration').notNull(),    // 1, 2, 3...
-  workerOutputPath: text('worker_output_path'), // .claude/orchestration/F-005/runs/.../coder/attempt-1.yaml
+  workerOutputPath: text('worker_output_path'), // .claude/orchestration/F005/runs/.../coder/attempt-1.yaml
   criticVerdictPath: text('critic_verdict_path'),
   status: text('status').notNull(),             // running | passed | failed | escalated
   triggeredBy: text('triggered_by', { mode: 'json' }),  // null | { type: 'fix-task', acId, ... }

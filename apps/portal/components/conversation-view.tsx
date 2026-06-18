@@ -12,6 +12,69 @@ interface ConversationTurn {
   isError?: boolean;
 }
 
+/**
+ * 将单个事件 payload 追加(或合并)到 turns 数组(就地修改 next)。
+ * 支持 agent 层事件(agent.input/token/assistant.text/tool_use/tool_result/result)
+ * 以及顶层 error(orchestrator 失败兜底)。
+ */
+function applyEvent(next: ConversationTurn[], payload: Record<string, unknown>): void {
+  switch (payload.type) {
+    case "agent.input": {
+      next.push({ role: "input", content: (payload.userPrompt as string) || "" });
+      break;
+    }
+    case "token":
+    case "assistant.text": {
+      const text = payload.text as string;
+      if (!text) break;
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant") {
+        last.content += text;
+      } else {
+        next.push({ role: "assistant", content: text });
+      }
+      break;
+    }
+    case "tool_use": {
+      next.push({
+        role: "tool",
+        content: "",
+        toolName: payload.name as string,
+        toolInput:
+          typeof payload.input === "string"
+            ? payload.input.slice(0, 200)
+            : JSON.stringify(payload.input ?? {}).slice(0, 200),
+      });
+      break;
+    }
+    case "tool_result": {
+      const last = next[next.length - 1];
+      if (last && last.role === "tool") {
+        last.content = ((payload.preview as string) || "").slice(0, 300);
+        last.isError = payload.isError === true;
+      }
+      break;
+    }
+    case "result": {
+      const success = payload.success === true;
+      next.push({
+        role: "result",
+        content: success
+          ? `✅ 完成 · ${payload.turns ?? "?"} turns${payload.costUsd ? ` · $${(payload.costUsd as number).toFixed(4)}` : ""}`
+          : `❌ 失败: ${payload.error ?? "unknown"}`,
+      });
+      break;
+    }
+    case "error": {
+      next.push({
+        role: "result",
+        content: `❌ 失败: ${payload.message ?? "unknown"}`,
+      });
+      break;
+    }
+  }
+}
+
 interface ConversationViewProps {
   runId: string;
 }
@@ -32,53 +95,12 @@ export function ConversationView({ runId }: ConversationViewProps) {
   const processEvent = useCallback((payload: Record<string, unknown>) => {
     setTurns((prev) => {
       const next = [...prev];
-      switch (payload.type) {
-        case "agent.input": {
-          // 合并到 input turn
-          next.push({ role: "input", content: payload.userPrompt as string || "", });
-          break;
-        }
-        case "token":
-        case "assistant.text": {
-          const text = payload.text as string;
-          if (!text) break;
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant") {
-            last.content += text;
-          } else {
-            next.push({ role: "assistant", content: text });
-          }
-          break;
-        }
-        case "tool_use": {
-          next.push({
-            role: "tool",
-            content: "",
-            toolName: payload.name as string,
-            toolInput: typeof payload.input === "string"
-              ? payload.input.slice(0, 200)
-              : JSON.stringify(payload.input ?? {}).slice(0, 200),
-          });
-          break;
-        }
-        case "tool_result": {
-          const last = next[next.length - 1];
-          if (last && last.role === "tool") {
-            last.content = (payload.preview as string || "").slice(0, 300);
-            last.isError = payload.isError === true;
-          }
-          break;
-        }
-        case "result": {
-          const success = payload.success === true;
-          next.push({
-            role: "result",
-            content: success
-              ? `✅ 完成 · ${payload.turns ?? "?"} turns${payload.costUsd ? ` · $${(payload.costUsd as number).toFixed(4)}` : ""}`
-              : `❌ 失败: ${payload.error ?? "unknown"}`,
-          });
-          break;
-        }
+      // node-event 容器:full-loop 父 run 把各节点(require/code/test/deploy)的
+      // agent 对话事件包在 event 字段里,解包后按普通事件渲染。
+      if (payload.type === "node-event" && payload.event) {
+        applyEvent(next, payload.event as Record<string, unknown>);
+      } else {
+        applyEvent(next, payload);
       }
       return next;
     });
