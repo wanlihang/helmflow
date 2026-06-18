@@ -535,18 +535,43 @@ async function runBulkAnalysis(
   const allResults: AnalysisResult[] = [];
   const classifySystemPrompt = "You are a precise status classifier. Based on the code inventory, classify the cell's implementation status. Output ONLY the JSON array wrapped in <ANALYSIS_RESULT> tags, nothing else.";
 
-  for (const cell of cellsToAnalyze) {
+  /** 529 限流自动重试(指数退避: 3s→6s→12s, 最多 3 次) */
+  async function runClassifyWithRetry(opts: { cwd: string; systemPrompt: string; userPrompt: string }, sseFn: (p: unknown) => void): Promise<{ text: string; durationMs: number }> {
+    const MAX_RETRIES = 3;
+    const delays = [3000, 6000, 12000];
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await runClassify(opts);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 529 = GLM 限流,可重试;其他错误直接抛
+        if (!msg.includes("529") || attempt === MAX_RETRIES) throw err;
+        sseFn({ type: "classify-retry", attempt: attempt + 1, maxRetries: MAX_RETRIES, delay: delays[attempt], reason: "GLM 529 限流" });
+        await new Promise((r) => setTimeout(r, delays[attempt]!));
+      }
+    }
+    throw new Error("runClassify exhausted retries");
+  }
+
+  for (let cellIdx = 0; cellIdx < cellsToAnalyze.length; cellIdx++) {
+    const cell = cellsToAnalyze[cellIdx];
+
+    // cell 间限速(非首个 cell 前等 2s,避免密集触发 GLM 限流)
+    if (cellIdx > 0) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+
     // 每 cell 独立 analyze run(真实 cellId,运行中心逐 cell 可观测)
     let cellRun: { id: string } | null = null;
     try {
       cellRun = createRun(db, cell.cellId, "analyze");
-      sse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id });
+      sse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id, progress: `${cellIdx + 1}/${cellsToAnalyze.length}` });
 
-      const classifyResult = await runClassify({
+      const classifyResult = await runClassifyWithRetry({
         cwd: sandboxPath,
         systemPrompt: classifySystemPrompt,
         userPrompt: buildClassifyPrompt(inventory, [cell]),
-      });
+      }, sse);
       const parsed = parseAnalysisOutput(classifyResult.text);
 
       // 写回分层归属(独立于状态变更)
