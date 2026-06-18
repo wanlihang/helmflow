@@ -9,7 +9,10 @@
 //    Authorization: Bearer 头传递 → 对应 ANTHROPIC_AUTH_TOKEN
 //  因此检测到非官方 baseURL 时,把 apiKey 自动降级为 authToken,避免 401 无效的 AuthKey。
 
-const FIXED_MODEL = "glm-5.2";
+// 默认对齐 Claude Code opus 映射的 glm-5.2[1M](1M 上下文版):同 key 同端点下,
+// 普通 glm-5.2 易触发 529 限流(配额/限流池不同),而 [1M] 变体不限流(实测聊天用此模型)。
+// 可用 HELMFLOW_ANTHROPIC_MODEL 覆盖。
+const DEFAULT_MODEL = "glm-5.2[1M]";
 
 export interface RunnerEnv {
   ANTHROPIC_API_KEY?: string;
@@ -47,7 +50,7 @@ export function buildRunnerEnv(): RunnerEnv {
   const effectiveApiKey = official ? apiKey : undefined;
 
   const env: RunnerEnv = {
-    ANTHROPIC_MODEL: FIXED_MODEL,
+    ANTHROPIC_MODEL: process.env.HELMFLOW_ANTHROPIC_MODEL || DEFAULT_MODEL,
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
   };
   if (effectiveApiKey) env.ANTHROPIC_API_KEY = effectiveApiKey;
