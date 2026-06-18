@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
+import { ConversationView } from "@/components/conversation-view";
 
 interface NodeState {
   node: string;
@@ -709,37 +710,10 @@ export default function RunPage({ params }: RunPageProps) {
         </div>
       )}
 
-      {/* Event log */}
+      {/* 对话式展示(Claude Code 终端风格) */}
       <section className="space-y-2">
-        <h2 className="text-base font-semibold">Event Log</h2>
-        <div className="max-h-96 overflow-auto rounded-md border border-border bg-muted p-3 text-xs font-mono space-y-0.5">
-          {logs.length === 0 && (
-            <div className="text-muted-foreground">
-              {sseStatus === "reconnecting"
-                ? "正在连接..."
-                : sseStatus === "offline"
-                  ? "后台运行中，数据库每 3 秒同步"
-                  : "Waiting for events..."}
-            </div>
-          )}
-          {logs.map((l, i) => (
-            <div
-              key={i}
-              className={
-                l.level === "error"
-                  ? "text-red-600"
-                  : l.level === "warn"
-                    ? "text-yellow-600"
-                    : l.level === "success"
-                      ? "text-green-600"
-                      : "text-foreground"
-              }
-            >
-              <span className="text-muted-foreground">{l.time}</span> {l.text}
-            </div>
-          ))}
-          <div ref={logEndRef} />
-        </div>
+        <h2 className="text-base font-semibold">对话记录</h2>
+        <ConversationView runId={runId} />
       </section>
     </div>
   );

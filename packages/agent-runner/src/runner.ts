@@ -133,6 +133,13 @@ async function runSingleSession(
   const sessionText: string[] = [];
 
   try {
+    // 记录发给模型的完整输入(对话式展示用)
+    opts.onEvent?.({
+      type: "agent.input",
+      systemPrompt: opts.systemPrompt ?? "",
+      userPrompt: prompt,
+    } as NodeRunEvent);
+
     const q = query({
       prompt,
       options: {

@@ -32,6 +32,7 @@ export interface NodeRunOptions {
 
 export type NodeRunEvent =
   | { type: "system.init"; sessionId: string; cwd: string; model: string }
+  | { type: "agent.input"; systemPrompt: string; userPrompt: string }
   | { type: "assistant.text"; text: string }
   | {
       type: "tool_use";
