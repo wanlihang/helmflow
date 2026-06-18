@@ -10,6 +10,29 @@ import { buildRunnerEnv, envToProcessEnv } from "./env";
 const PREVIEW_MAX = 500;
 const DEFAULT_TURNS_PER_SESSION = 15;
 
+// ---------------------------------------------------------------------------
+// 限流/过载退避(529/429):端点临时过载时指数退避重试,而非立即 fail。
+// 否则 worker 在限流期间会反复无效重试、烧时间却拿不到结果(7×24 鲁棒性关键)。
+// ---------------------------------------------------------------------------
+const MAX_RATELIMIT_RETRIES = 5;
+const BASE_BACKOFF_MS = 5_000;
+const MAX_BACKOFF_MS = 120_000;
+
+function isRateLimitError(error: string | undefined): boolean {
+  if (!error) return false;
+  return /529|429|overloaded|rate.?limit|too many requests|访问量过大|稍后再试/i.test(error);
+}
+
+function rateLimitSignal(error: string | undefined): string {
+  if (!error) return "unknown";
+  const m = error.match(/(529|429)/);
+  return m && m[1] ? m[1] : "overloaded";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function previewOf(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value.slice(0, PREVIEW_MAX);
@@ -202,6 +225,7 @@ export async function runNode(opts: NodeRunOptions): Promise<NodeRunResult> {
   let lastSuccess = false;
   let lastError: string | undefined;
   let sessionCount = 0;
+  let rateLimitRetries = 0;
   const allText: string[] = [];
 
   let currentPrompt = opts.userPrompt;
@@ -232,6 +256,20 @@ export async function runNode(opts: NodeRunOptions): Promise<NodeRunResult> {
 
     if (sessionResult.success) {
       break;
+    }
+
+    // 端点限流/过载(529/429):指数退避重试,不消耗 turn budget,避免 worker 反复空转。
+    // 退避序列:5s, 10s, 20s, 40s, 80s(封顶 120s);5 次后仍失败才放弃(走正常 fail 路径)。
+    if (isRateLimitError(sessionResult.error) && rateLimitRetries < MAX_RATELIMIT_RETRIES) {
+      rateLimitRetries++;
+      totalTurns -= sessionResult.turns; // 限流未真正执行,回退 turn 计数
+      const backoffMs = Math.min(BASE_BACKOFF_MS * 2 ** (rateLimitRetries - 1), MAX_BACKOFF_MS);
+      opts.onEvent?.({
+        type: "assistant.text",
+        text: `\n[端点限流 ${rateLimitSignal(sessionResult.error)},第 ${rateLimitRetries}/${MAX_RATELIMIT_RETRIES} 次退避 ${Math.round(backoffMs / 1000)}s 后重试…]\n`,
+      });
+      await sleep(backoffMs);
+      continue;
     }
 
     if (!sessionResult.hitTurnLimit) {
