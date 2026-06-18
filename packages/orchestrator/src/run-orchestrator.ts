@@ -290,7 +290,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
         }
       }
 
-      const decision = nextNode(
+      let decision = nextNode(
         currentNode,
         outcome,
         result.failReason,
@@ -298,6 +298,15 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
         globalLoops,
         nodeRetries,
       );
+      // 终态可配置:HELMFLOW_SKIP_DEPLOY=1 时 test 通过即视为 done,产出"通过测试的
+      // 代码"(merge worktree),不进入 deploy 节点(适配无 gh / 内网 GitLab 等场景)。
+      if (
+        decision.action === "next" &&
+        decision.node === "deploy" &&
+        process.env.HELMFLOW_SKIP_DEPLOY === "1"
+      ) {
+        decision = { action: "done" };
+      }
 
       if (decision.action === "done") {
         try {
