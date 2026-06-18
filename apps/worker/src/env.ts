@@ -110,7 +110,8 @@ export function loadWorkerConfig(): WorkerConfig {
     portalCwd,
     helmcodeRoot: project.helmcodeRoot,
     workerId: `${process.pid}@${hostname()}`,
-    concurrency: intEnv("HELMFLOW_WORKER_CONCURRENCY", 3),
+    // 默认并发 1:claude-agent-sdk 密集调用易撞端点 RPM/TPM,串行更稳(可按配额调高)
+    concurrency: intEnv("HELMFLOW_WORKER_CONCURRENCY", 1),
     pollMs: intEnv("HELMFLOW_WORKER_POLL_MS", 10000),
     dailyBudgetUsd: dailyBudgetUsd !== undefined && Number.isFinite(dailyBudgetUsd)
       ? dailyBudgetUsd

@@ -14,9 +14,11 @@ const DEFAULT_TURNS_PER_SESSION = 15;
 // 限流/过载退避(529/429):端点临时过载时指数退避重试,而非立即 fail。
 // 否则 worker 在限流期间会反复无效重试、烧时间却拿不到结果(7×24 鲁棒性关键)。
 // ---------------------------------------------------------------------------
-const MAX_RATELIMIT_RETRIES = 5;
+// 限流退避:智谱等端点对密集程序化调用 RPM/TPM 限流较严,退避需拉长到分钟级让窗口真正恢复。
+// 8 次 × 指数(5s→10s→20s→40s→80s→160s→320s→600s),累计约 20min。
+const MAX_RATELIMIT_RETRIES = 8;
 const BASE_BACKOFF_MS = 5_000;
-const MAX_BACKOFF_MS = 120_000;
+const MAX_BACKOFF_MS = 600_000;
 
 function isRateLimitError(error: string | undefined): boolean {
   if (!error) return false;

@@ -20,7 +20,8 @@ import {
 import type { NodeRunnerResult } from "../types";
 import { buildReflectionAppendix } from "../prompt-builder";
 
-const MAX_TURNS = 25;
+// 适度收紧:降低单 run 内密集请求,减少撞端点 RPM/TPM 的概率(配合 worker 限流退避)
+const MAX_TURNS = 15;
 
 interface RunRequireNodeArgs {
   db: DB;
