@@ -20,6 +20,7 @@ export interface RunnerEnv {
   ANTHROPIC_BASE_URL?: string;
   ANTHROPIC_MODEL: string;
   CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: string;
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: string;
 }
 
 function isOfficialAnthropicBase(baseURL?: string): boolean {
@@ -52,6 +53,9 @@ export function buildRunnerEnv(): RunnerEnv {
   const env: RunnerEnv = {
     ANTHROPIC_MODEL: process.env.HELMFLOW_ANTHROPIC_MODEL || DEFAULT_MODEL,
     CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
+    // 对齐 Claude Code CLI 配置:禁用辅助请求(遥测/辅助模型摘要标题等),
+    // 避免 claude-code 子进程除主请求外发额外请求累积撞端点 RPM/TPM(实测 CLI 不 529、SDK 子进程 529 的根因)。
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   };
   if (effectiveApiKey) env.ANTHROPIC_API_KEY = effectiveApiKey;
   if (effectiveAuthToken) env.ANTHROPIC_AUTH_TOKEN = effectiveAuthToken;
