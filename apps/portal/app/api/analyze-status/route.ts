@@ -563,15 +563,22 @@ async function runBulkAnalysis(
 
     // 每 cell 独立 analyze run(真实 cellId,运行中心逐 cell 可观测)
     let cellRun: { id: string } | null = null;
+    // per-cell sse:事件双写(主 run + per-cell run,这样运行中心点 per-cell 也能看内容)
+    const cellSse = (payload: unknown) => {
+      sse(payload); // 写到主 run(总览用)
+      if (cellRun) {
+        try { createRunEvent(db, cellRun.id, (payload as { type: string }).type, payload); } catch { /* ignore */ }
+      }
+    };
     try {
       cellRun = createRun(db, cell.cellId, "analyze");
-      sse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id, progress: `${cellIdx + 1}/${cellsToAnalyze.length}` });
+      cellSse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id, progress: `${cellIdx + 1}/${cellsToAnalyze.length}` });
 
       const classifyResult = await runClassifyWithRetry({
         cwd: sandboxPath,
         systemPrompt: classifySystemPrompt,
         userPrompt: buildClassifyPrompt(inventory, [cell]),
-      }, sse);
+      }, cellSse);
       const parsed = parseAnalysisOutput(classifyResult.text);
 
       // 写回分层归属(独立于状态变更)
@@ -598,12 +605,12 @@ async function runBulkAnalysis(
       }
       allResults.push(...results);
       updateRun(db, cellRun.id, "done");
-      sse({ type: "classify-cell-done", cellId: cell.cellId, runId: cellRun.id, results, durationMs: classifyResult.durationMs });
+      cellSse({ type: "classify-cell-done", cellId: cell.cellId, runId: cellRun.id, results, durationMs: classifyResult.durationMs });
     } catch (err) {
       // 单 cell 失败不影响其他 cell(故障隔离)
       const message = err instanceof Error ? err.message : String(err);
       if (cellRun) { try { updateRun(db, cellRun.id, "failed"); } catch { /* ignore */ } }
-      sse({ type: "classify-cell-failed", cellId: cell.cellId, message });
+      cellSse({ type: "classify-cell-failed", cellId: cell.cellId, message });
     }
   }
 

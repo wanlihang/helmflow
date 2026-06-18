@@ -163,6 +163,7 @@ export default function RunPage({ params }: RunPageProps) {
   const [featureId, setFeatureId] = useState<string>("");
   const [contractId, setContractId] = useState<string>("");
   const [runState, setRunState] = useState<string>("");
+  const [runKind, setRunKind] = useState<string>("");
   const [nodes, setNodes] = useState<Record<string, NodeState>>(() => {
     const init: Record<string, NodeState> = {};
     for (const n of NODE_ORDER) {
@@ -328,6 +329,7 @@ export default function RunPage({ params }: RunPageProps) {
 
         setFeatureId(data.run.featureId);
         setRunState(data.run.state);
+        setRunKind(data.run.kind);
 
         // Restore node states from DB
         const restored: Record<string, NodeState> = {};
@@ -583,7 +585,16 @@ export default function RunPage({ params }: RunPageProps) {
       </nav>
 
       <header className="space-y-2 border-b border-border pb-4">
-        <h1 className="text-2xl font-bold tracking-tight">Full-Loop Run</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {runKind === "full-loop" ? "Full-Loop Run"
+           : runKind === "analyze" || runKind === "analyze-scan" ? "状态分析"
+           : runKind === "require" ? "需求澄清"
+           : runKind === "code" ? "代码实现"
+           : runKind === "test" ? "测试验证"
+           : runKind === "deploy" ? "上线部署"
+           : runKind === "contract-sync" ? "契约同步"
+           : runKind ? runKind : "Run"}
+        </h1>
         <div className="flex flex-wrap gap-2 text-xs font-mono text-muted-foreground">
           <span>run={runId || "..."}</span>
           {featureId && <span>feature={featureId}</span>}
@@ -602,7 +613,8 @@ export default function RunPage({ params }: RunPageProps) {
         </div>
       </header>
 
-      {/* Timeline */}
+      {/* Pipeline(仅 Full-Loop) */}
+      {runKind === "full-loop" && (
       <section className="space-y-3">
         <h2 className="text-base font-semibold">Pipeline</h2>
         <div className="flex items-center gap-1">
@@ -637,6 +649,7 @@ export default function RunPage({ params }: RunPageProps) {
           {final && ` · duration=${fmtDuration(final.totalDurationMs)} · loops=${final.totalLoops}`}
         </div>
       </section>
+      )}
 
       {/* Reconnecting / Offline banners */}
       {sseStatus === "reconnecting" && !final && (
