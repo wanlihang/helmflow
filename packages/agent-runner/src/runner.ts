@@ -224,7 +224,13 @@ export async function runNode(opts: NodeRunOptions): Promise<NodeRunResult> {
   const env = buildRunnerEnv();
   const processEnv = envToProcessEnv(env);
 
-  const turnsPerSession = opts.maxTurnsPerSession ?? DEFAULT_TURNS_PER_SESSION;
+  // turnsPerSession 可经 HELMFLOW_TURNS_PER_SESSION 收紧(模拟对话节奏:小 session + 间隔,
+  // 避免单 session 多 turn 密集连发撞端点 RPM)。未设则用调用方默认。
+  const envTurns = Number(process.env.HELMFLOW_TURNS_PER_SESSION);
+  const turnsPerSession =
+    Number.isFinite(envTurns) && envTurns > 0
+      ? envTurns
+      : (opts.maxTurnsPerSession ?? DEFAULT_TURNS_PER_SESSION);
   const totalBudget = opts.maxTurns;
   const startTime = Date.now();
 
@@ -304,6 +310,17 @@ ${sessionResult.lastAssistantText.slice(-1000)}
       type: "assistant.text",
       text: `\n[session ${sessionCount} 因 turn 限制中断,已用 ${totalTurns}/${totalBudget} turns,自动续接...]\n`,
     });
+
+    // 模拟对话节奏:session 间节流(sleep),避免密集连发撞端点 RPM。
+    // HELMFLOW_TURN_INTERVAL_MS(默认 0=不节流);worker 设为几秒以接近人工交互频率。
+    const intervalMs = Number(process.env.HELMFLOW_TURN_INTERVAL_MS) || 0;
+    if (intervalMs > 0) {
+      opts.onEvent?.({
+        type: "assistant.text",
+        text: `\n[节流:session 间隔 ${Math.round(intervalMs / 1000)}s(模拟对话节奏,降 RPM)]\n`,
+      });
+      await sleep(intervalMs);
+    }
   }
 
   const totalDurationMs = Date.now() - startTime;

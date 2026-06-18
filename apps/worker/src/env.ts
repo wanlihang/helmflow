@@ -102,6 +102,11 @@ export function loadWorkerConfig(): WorkerConfig {
   const dailyBudgetUsd =
     dailyBudgetRaw && dailyBudgetRaw.length > 0 ? Number(dailyBudgetRaw) : undefined;
 
+  // 模拟对话节奏(降密集,避免撞端点 RPM):小 session + session 间间隔。
+  // 可用 env 覆盖;设 0 关闭节流。
+  if (!process.env.HELMFLOW_TURNS_PER_SESSION) process.env.HELMFLOW_TURNS_PER_SESSION = "2";
+  if (!process.env.HELMFLOW_TURN_INTERVAL_MS) process.env.HELMFLOW_TURN_INTERVAL_MS = "5000";
+
   return {
     db,
     dbPath,
