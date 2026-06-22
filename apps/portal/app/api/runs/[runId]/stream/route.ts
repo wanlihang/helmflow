@@ -1,11 +1,11 @@
+import { getDb } from "@/lib/db";
+import { createSseHeartbeat, sseEncode, sseResponse } from "@/lib/server-utils";
 import {
+  type OrchestratorEvent,
   getRunEmitter,
   scheduleEmitterCleanup,
-  type OrchestratorEvent,
 } from "@helmflow/orchestrator";
-import { getDb } from "@/lib/db";
 import { listRunEvents } from "@helmflow/storage";
-import { sseEncode, sseResponse, createSseHeartbeat } from "@/lib/server-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,10 +14,7 @@ interface StreamRouteParams {
   params: Promise<{ runId: string }>;
 }
 
-export async function GET(
-  req: Request,
-  context: StreamRouteParams,
-): Promise<Response> {
+export async function GET(req: Request, context: StreamRouteParams): Promise<Response> {
   const { runId } = await context.params;
 
   const url = new URL(req.url);
@@ -61,8 +58,7 @@ export async function GET(
         if (cursor0 > 0) {
           try {
             for (const ev of listRunEvents(db, runId, lastId)) {
-              if (!safeEnqueue(encoder.encode(`data: ${ev.payload}\nid: ${ev.id}\n\n`)))
-                return;
+              if (!safeEnqueue(encoder.encode(`data: ${ev.payload}\nid: ${ev.id}\n\n`))) return;
               lastId = ev.id;
               if (ev.eventType === "done" || ev.eventType === "error") {
                 safeClose();

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
-import { getRunById, createRun, createRunEvent, updateRun } from "@helmflow/storage";
-import { runNode } from "@helmflow/agent-runner";
-import { resolveSandboxPath } from "@/lib/server-utils";
-import { getCurrentProjectId } from "@/lib/project";
 import { getDb } from "@/lib/db";
+import { getCurrentProjectId } from "@/lib/project";
+import { resolveSandboxPath } from "@/lib/server-utils";
+import { runNode } from "@helmflow/agent-runner";
+import { createRun, createRunEvent, getRunById, updateRun } from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,12 +13,15 @@ interface InjectBody {
 }
 
 // POST /api/runs/[runId]/inject — 人工注入消息(resume session 续接)
-export async function POST(req: Request, { params }: { params: Promise<{ runId: string }> }): Promise<Response> {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ runId: string }> },
+): Promise<Response> {
   const { runId } = await params;
 
   let body: InjectBody;
   try {
-    body = await req.json() as InjectBody;
+    body = (await req.json()) as InjectBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -59,7 +62,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
       try {
         const result = await runNode({
           cwd: sandboxPath,
-          systemPrompt: "你是 HelmFlow 的人工干预助手。用户对正在进行的任务有补充信息,请基于用户输入继续协助。",
+          systemPrompt:
+            "你是 HelmFlow 的人工干预助手。用户对正在进行的任务有补充信息,请基于用户输入继续协助。",
           userPrompt: `用户补充信息:\n${message}`,
           allowedTools: ["Read", "Bash", "Grep", "Glob"],
           maxTurns: 10,
@@ -68,11 +72,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ runId: 
               if (event.type === "assistant.text") {
                 createRunEvent(db, injectRun.id, "token", { type: "token", text: event.text });
               } else if (event.type === "tool_use") {
-                createRunEvent(db, injectRun.id, "tool_use", { type: "tool_use", name: event.name, input: event.input });
+                createRunEvent(db, injectRun.id, "tool_use", {
+                  type: "tool_use",
+                  name: event.name,
+                  input: event.input,
+                });
               } else if (event.type === "tool_result") {
-                createRunEvent(db, injectRun.id, "tool_result", { type: "tool_result", isError: event.isError, preview: event.preview });
+                createRunEvent(db, injectRun.id, "tool_result", {
+                  type: "tool_result",
+                  isError: event.isError,
+                  preview: event.preview,
+                });
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           },
         });
 

@@ -4,33 +4,33 @@
  * 注入 getDb + sandboxPath + 人工映射表,供 API route 调用。
  */
 
+import { type Feature, loadMatrix } from "@/lib/matrix";
+import { runClassify } from "@helmflow/agent-runner";
 import {
-  planSync,
-  applySync,
-  buildManualChange,
-  buildLlmMatchPrompt,
-  parseLlmMatchResult,
-  importContractIfNeeded,
-  mapHelmcodeStatusToScenario,
-  type MatrixFeature,
   type ManualMapping,
+  type MatrixFeature,
   type SyncPlan,
   type SyncPlanChange,
   type ScenarioStatus as SyncScenarioStatus,
+  applySync,
+  buildLlmMatchPrompt,
+  buildManualChange,
+  importContractIfNeeded,
+  mapHelmcodeStatusToScenario,
+  parseLlmMatchResult,
+  planSync,
 } from "@helmflow/contract-sync";
-import { runClassify } from "@helmflow/agent-runner";
 import {
   type DB,
-  ensureVirtualCell,
   createRun,
-  updateRun,
+  ensureVirtualCell,
   listContractCellMappings,
   listSyncResultsByState,
   markSyncResultMatched,
+  updateRun,
   upsertContractCellMapping,
   upsertContractSyncResult,
 } from "@helmflow/storage";
-import { loadMatrix, type Feature } from "@/lib/matrix";
 
 const LLM_MATCH_THRESHOLD = 0.6;
 
@@ -71,7 +71,11 @@ export interface ScanOutcome {
   /** 自动应用(高置信 matched)的 apply 结果 */
   autoApply: { applied: string[]; skipped: string[]; errors: string[] };
   /** LLM 辅助匹配结果(env HELMFLOW_CONTRACT_SYNC_LLM=1 时启用) */
-  llm: { enabled: boolean; promoted: number; details: Array<{ contractFeatureId: string; cellId: string; confidence: number }> };
+  llm: {
+    enabled: boolean;
+    promoted: number;
+    details: Array<{ contractFeatureId: string; cellId: string; confidence: number }>;
+  };
 }
 
 /**
@@ -116,7 +120,8 @@ export async function runContractSyncScan(args: RunScanArgs): Promise<ScanOutcom
         try {
           const { text } = await runClassify({
             cwd: sandboxPath,
-            systemPrompt: "你是契约匹配助手。根据契约语义(功能含义、领域、handler)判断它对应哪个 matrix cell。只输出指定格式。",
+            systemPrompt:
+              "你是契约匹配助手。根据契约语义(功能含义、领域、handler)判断它对应哪个 matrix cell。只输出指定格式。",
             userPrompt: buildLlmMatchPrompt(r.meta, matrixFeatures),
           });
           const outcome = parseLlmMatchResult(text, matrixFeatures);
@@ -125,7 +130,14 @@ export async function runContractSyncScan(args: RunScanArgs): Promise<ScanOutcom
             const [fid, ...sParts] = outcome.cellId.split("__");
             const scenarioName = sParts.join("__");
             if (fid && scenarioName) {
-              markSyncResultMatched(db, projectId, r.contractFeatureId, outcome.cellId, fid, scenarioName);
+              markSyncResultMatched(
+                db,
+                projectId,
+                r.contractFeatureId,
+                outcome.cellId,
+                fid,
+                scenarioName,
+              );
               // LLM 选的 cell 若不同于启发式 chosen,补 import 正文到新 cell(详情页可见)
               importContractIfNeeded(db, projectId, outcome.cellId, r.meta);
               llmChanges.push({
@@ -137,7 +149,11 @@ export async function runContractSyncScan(args: RunScanArgs): Promise<ScanOutcom
                 confidence: outcome.confidence,
                 helmcodeStatus: r.meta.status,
               });
-              llm.details.push({ contractFeatureId: r.contractFeatureId, cellId: outcome.cellId, confidence: outcome.confidence });
+              llm.details.push({
+                contractFeatureId: r.contractFeatureId,
+                cellId: outcome.cellId,
+                confidence: outcome.confidence,
+              });
             }
           }
         } catch {

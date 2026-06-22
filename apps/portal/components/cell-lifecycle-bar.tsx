@@ -26,7 +26,7 @@ function inferCurrentStage(
   scenarioStatus: string,
   agentStatus: string,
   contractStatus?: string | null,
-  hasContract: boolean = false,
+  hasContract = false,
 ): Stage | null {
   // 已支持 / 废弃 → 不走 agent pipeline
   if (scenarioStatus === "已支持" || scenarioStatus === "废弃") {
@@ -110,9 +110,12 @@ export function CellLifecycleBar({
   // 废弃格子不显示进度条
   if (scenarioStatus === "废弃") return null;
 
-  const label = current === null
-    ? (agentStatus === "done" ? "4 节点 Pipeline 已完成" : "已有实现（未经过 Agent 流程）")
-    : undefined;
+  const label =
+    current === null
+      ? agentStatus === "done"
+        ? "4 节点 Pipeline 已完成"
+        : "已有实现（未经过 Agent 流程）"
+      : undefined;
 
   return (
     <div className="space-y-1">
@@ -138,16 +141,12 @@ export function CellLifecycleBar({
                   {stage.label}
                 </div>
               </div>
-              {idx < STAGES.length - 1 && (
-                <div className="w-4 h-px bg-border shrink-0" />
-              )}
+              {idx < STAGES.length - 1 && <div className="w-4 h-px bg-border shrink-0" />}
             </div>
           );
         })}
       </div>
-      {label && (
-        <p className="text-[10px] text-muted-foreground">{label}</p>
-      )}
+      {label && <p className="text-[10px] text-muted-foreground">{label}</p>}
     </div>
   );
 }

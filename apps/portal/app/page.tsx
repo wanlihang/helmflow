@@ -1,8 +1,8 @@
-import { FeatureMatrixTable } from "@/components/feature-matrix-table";
 import { AnalyzeAllButton } from "@/components/analyze-all-button";
 import { AnalyzeStructureButton } from "@/components/analyze-structure-button";
 import { EmptyMatrixGuide } from "@/components/empty-matrix-guide";
-import { loadMatrix, getTotalFeatureCount, getAllScenarioNames } from "@/lib/matrix";
+import { FeatureMatrixTable } from "@/components/feature-matrix-table";
+import { getAllScenarioNames, getTotalFeatureCount, loadMatrix } from "@/lib/matrix";
 import { getCurrentProjectId } from "@/lib/project";
 
 interface FusedStats {
@@ -14,7 +14,13 @@ interface FusedStats {
 }
 
 function computeFusedStats(matrix: ReturnType<typeof loadMatrix>): FusedStats {
-  const stats: FusedStats = { completed: 0, inProgress: 0, notStarted: 0, blocked: 0, deprecated: 0 };
+  const stats: FusedStats = {
+    completed: 0,
+    inProgress: 0,
+    notStarted: 0,
+    blocked: 0,
+    deprecated: 0,
+  };
   for (const d of matrix.domains) {
     for (const f of d.features) {
       for (const s of f.scenarios) {

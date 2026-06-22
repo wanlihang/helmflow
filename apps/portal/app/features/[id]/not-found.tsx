@@ -4,9 +4,7 @@ export default function FeatureNotFound() {
   return (
     <div className="space-y-4 text-center py-16">
       <h1 className="text-3xl font-bold tracking-tight">Feature not found</h1>
-      <p className="text-muted-foreground">
-        没有找到对应的功能点,可能 ID 不存在或已被移除。
-      </p>
+      <p className="text-muted-foreground">没有找到对应的功能点,可能 ID 不存在或已被移除。</p>
       <div>
         <Link
           href="/"

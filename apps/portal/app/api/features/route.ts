@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getCurrentProjectId } from "@/lib/project";
 import {
   createFeatureManual,
   createScenarioManual,
   upsertFeatureScenario,
 } from "@helmflow/storage";
-import { getCurrentProjectId } from "@/lib/project";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +62,11 @@ export async function POST(req: Request): Promise<Response> {
     const defaultScenarios = body.defaultScenarios;
     if (Array.isArray(defaultScenarios)) {
       for (const ds of defaultScenarios) {
-        if (typeof ds === "object" && ds !== null && typeof (ds as Record<string, unknown>).name === "string") {
+        if (
+          typeof ds === "object" &&
+          ds !== null &&
+          typeof (ds as Record<string, unknown>).name === "string"
+        ) {
           createScenarioManual(db, {
             featureId: id,
             scenarioName: (ds as Record<string, unknown>).name as string,

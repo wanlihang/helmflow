@@ -1,4 +1,4 @@
-import type { RunRow, ContractRow, CommitRow } from "@helmflow/storage";
+import type { CommitRow, ContractRow, RunRow } from "@helmflow/storage";
 
 interface TimelineEntry {
   type: "run" | "contract" | "commit";
@@ -23,7 +23,12 @@ function buildEntries(props: CellTimelineProps): TimelineEntry[] {
       time: r.startedAt,
       title: `${r.kind} run`,
       detail: r.id,
-      status: r.state === "done" || r.state === "applied" ? "success" : r.state === "failed" ? "failed" : "running",
+      status:
+        r.state === "done" || r.state === "applied"
+          ? "success"
+          : r.state === "failed"
+            ? "failed"
+            : "running",
     });
   }
 
@@ -73,7 +78,9 @@ export function CellTimeline({ runs, contracts, commits }: CellTimelineProps) {
       {entries.map((entry, i) => (
         <div key={`${entry.type}-${entry.detail}-${i}`} className="flex gap-3 pb-3">
           <div className="flex flex-col items-center">
-            <span className={`mt-1 inline-block h-2.5 w-2.5 rounded-full shrink-0 ${statusDotClass[entry.status]}`} />
+            <span
+              className={`mt-1 inline-block h-2.5 w-2.5 rounded-full shrink-0 ${statusDotClass[entry.status]}`}
+            />
             {i < entries.length - 1 && <span className="w-px flex-1 bg-border" />}
           </div>
           <div className="flex-1 pb-2">

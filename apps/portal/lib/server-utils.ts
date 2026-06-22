@@ -3,11 +3,11 @@
  * 仅用于 Next.js API route (Node.js runtime)。
  */
 
-import { resolve, isAbsolute } from "node:path";
 import { existsSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+import { getDb } from "@/lib/db";
 import { getCurrentProjectId } from "@/lib/project";
 import { getProject } from "@helmflow/manifest-loader";
-import { getDb } from "@/lib/db";
 import { getProjectById } from "@helmflow/storage";
 
 // ─── 类型守卫 ─────────────────────────────────────────────────────────
@@ -23,9 +23,7 @@ export function sseEncode(encoder: TextEncoder, payload: unknown): Uint8Array {
 }
 
 /** 创建标准 SSE Response (text/event-stream + no-cache + no-buffering) */
-export function sseResponse(
-  body: ReadableStream<Uint8Array>,
-): Response {
+export function sseResponse(body: ReadableStream<Uint8Array>): Response {
   return new Response(body, {
     status: 200,
     headers: {

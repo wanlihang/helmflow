@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface DriftPanelProps {
   /** 是否检测到 drift(当前 checksum ≠ 项目绑定) */
@@ -14,7 +14,10 @@ interface DriftPanelProps {
 interface PreviewData {
   currentVersion: { helmcode: string; checksum: string; gitHead: string | null };
   diff: { changed: string[]; added: string[]; removed: string[]; all: string[]; error?: string };
-  impact: { affectedCells: Array<{ cellId: string; hits: string[]; reason: string }>; total: number };
+  impact: {
+    affectedCells: Array<{ cellId: string; hits: string[]; reason: string }>;
+    total: number;
+  };
 }
 
 interface UpgradeCheckData {
@@ -56,7 +59,12 @@ export function HelmcodeDriftPanel({ drift, bound }: DriftPanelProps) {
   };
 
   const handleUpgrade = async () => {
-    if (!confirm("确认执行升级?HelmFlow 将在 helmcode 仓库 git checkout/pull main,并重新绑定版本。升级前请确认已 dryRun 预览。")) return;
+    if (
+      !confirm(
+        "确认执行升级?HelmFlow 将在 helmcode 仓库 git checkout/pull main,并重新绑定版本。升级前请确认已 dryRun 预览。",
+      )
+    )
+      return;
     setUpgrading(true);
     setError(null);
     try {
@@ -130,12 +138,15 @@ export function HelmcodeDriftPanel({ drift, bound }: DriftPanelProps) {
             <div className="text-yellow-700">{upgradeInfo.error}</div>
           ) : upgradeInfo.hasUpdate ? (
             <div className="text-blue-700">
-              ⬆ 上游 <code className="font-mono">origin/{upgradeInfo.branch}</code> 有 <b>{upgradeInfo.behind}</b> 个新提交。
-              本地 {upgradeInfo.localHead.slice(0, 8)} → 远程 {(upgradeInfo.remoteHead ?? "").slice(0, 8)}。
-              点「升级」HelmFlow 代你 git pull + 重新绑定(升级前可先 dryRun 预览)。
+              ⬆ 上游 <code className="font-mono">origin/{upgradeInfo.branch}</code> 有{" "}
+              <b>{upgradeInfo.behind}</b> 个新提交。 本地 {upgradeInfo.localHead.slice(0, 8)} → 远程{" "}
+              {(upgradeInfo.remoteHead ?? "").slice(0, 8)}。 点「升级」HelmFlow 代你 git pull +
+              重新绑定(升级前可先 dryRun 预览)。
             </div>
           ) : (
-            <div className="text-green-700">✓ 已是上游最新(本地与 origin/{upgradeInfo.branch} 一致)。</div>
+            <div className="text-green-700">
+              ✓ 已是上游最新(本地与 origin/{upgradeInfo.branch} 一致)。
+            </div>
           )}
         </div>
       )}
@@ -150,7 +161,11 @@ export function HelmcodeDriftPanel({ drift, bound }: DriftPanelProps) {
           ✅ 项目绑定的标准版本与 helmcode 源一致,无 drift。
         </div>
         {upgradeBlock}
-        {error && <div className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+            {error}
+          </div>
+        )}
       </div>
     );
   }
@@ -160,77 +175,102 @@ export function HelmcodeDriftPanel({ drift, bound }: DriftPanelProps) {
       {upgradeBlock}
       <div className="space-y-3 rounded-md border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">
-            {drift ? "⚠ 标准 drift 检测" : "首次绑定"}
-        </h3>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={handlePreview} disabled={previewing}>
-            {previewing ? "预览中…" : "预览变更(dryRun)"}
-          </Button>
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {drift
-          ? "helmcode 源的 standards 已变化(你手动 git pull/checkout 过)。点预览看改了哪些 pattern、影响哪些 cell,确认后采纳。"
-          : "项目尚未绑定标准版本。预览后采纳,建立版本基线。"}
-      </p>
-
-      {error && <div className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
-
-      {preview && (
-        <div className="space-y-3 rounded border border-border bg-muted/30 p-3 text-xs">
-          <div>
-            <span className="text-muted-foreground">当前源版本:</span>{" "}
-            <span className="font-mono text-green-600">{preview.currentVersion.helmcode}</span>
-            {" / "}
-            <span className="font-mono">{preview.currentVersion.checksum.slice(0, 12)}…</span>
-            {preview.currentVersion.gitHead && (
-              <span className="font-mono text-muted-foreground"> @ {preview.currentVersion.gitHead.slice(0, 12)}</span>
-            )}
+          <h3 className="text-sm font-semibold">{drift ? "⚠ 标准 drift 检测" : "首次绑定"}</h3>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handlePreview} disabled={previewing}>
+              {previewing ? "预览中…" : "预览变更(dryRun)"}
+            </Button>
           </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {drift
+            ? "helmcode 源的 standards 已变化(你手动 git pull/checkout 过)。点预览看改了哪些 pattern、影响哪些 cell,确认后采纳。"
+            : "项目尚未绑定标准版本。预览后采纳,建立版本基线。"}
+        </p>
 
-          {preview.diff.error ? (
-            <div className="text-yellow-700">diff 不可用: {preview.diff.error}(可能是首次提交,无 fromHead)</div>
-          ) : (
+        {error && (
+          <div className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+            {error}
+          </div>
+        )}
+
+        {preview && (
+          <div className="space-y-3 rounded border border-border bg-muted/30 p-3 text-xs">
+            <div>
+              <span className="text-muted-foreground">当前源版本:</span>{" "}
+              <span className="font-mono text-green-600">{preview.currentVersion.helmcode}</span>
+              {" / "}
+              <span className="font-mono">{preview.currentVersion.checksum.slice(0, 12)}…</span>
+              {preview.currentVersion.gitHead && (
+                <span className="font-mono text-muted-foreground">
+                  {" "}
+                  @ {preview.currentVersion.gitHead.slice(0, 12)}
+                </span>
+              )}
+            </div>
+
+            {preview.diff.error ? (
+              <div className="text-yellow-700">
+                diff 不可用: {preview.diff.error}(可能是首次提交,无 fromHead)
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="font-semibold">改动文件({preview.diff.all.length})</div>
+                {preview.diff.all.length === 0 ? (
+                  <div className="text-muted-foreground">
+                    无文件改动(checksum 变可能来自 git ref 切换)。
+                  </div>
+                ) : (
+                  <ul className="space-y-0.5 font-mono">
+                    {preview.diff.changed.map((f) => (
+                      <li key={`c-${f}`} className="text-yellow-700">
+                        M {f}
+                      </li>
+                    ))}
+                    {preview.diff.added.map((f) => (
+                      <li key={`a-${f}`} className="text-green-700">
+                        A {f}
+                      </li>
+                    ))}
+                    {preview.diff.removed.map((f) => (
+                      <li key={`r-${f}`} className="text-red-700">
+                        D {f}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="space-y-1">
-              <div className="font-semibold">改动文件({preview.diff.all.length})</div>
-              {preview.diff.all.length === 0 ? (
-                <div className="text-muted-foreground">无文件改动(checksum 变可能来自 git ref 切换)。</div>
+              <div className="font-semibold">影响 cell({preview.impact.total})</div>
+              {preview.impact.total === 0 ? (
+                <div className="text-muted-foreground">无契约引用被改标准。</div>
               ) : (
-                <ul className="space-y-0.5 font-mono">
-                  {preview.diff.changed.map((f) => <li key={`c-${f}`} className="text-yellow-700">M {f}</li>)}
-                  {preview.diff.added.map((f) => <li key={`a-${f}`} className="text-green-700">A {f}</li>)}
-                  {preview.diff.removed.map((f) => <li key={`r-${f}`} className="text-red-700">D {f}</li>)}
+                <ul className="space-y-0.5">
+                  {preview.impact.affectedCells.map((c) => (
+                    <li key={c.cellId}>
+                      <code className="font-mono">{c.cellId}</code>
+                      <span className="text-muted-foreground"> — 命中: {c.hits.join(", ")}</span>
+                    </li>
+                  ))}
                 </ul>
               )}
             </div>
-          )}
 
-          <div className="space-y-1">
-            <div className="font-semibold">影响 cell({preview.impact.total})</div>
-            {preview.impact.total === 0 ? (
-              <div className="text-muted-foreground">无契约引用被改标准。</div>
-            ) : (
-              <ul className="space-y-0.5">
-                {preview.impact.affectedCells.map((c) => (
-                  <li key={c.cellId}>
-                    <code className="font-mono">{c.cellId}</code>
-                    <span className="text-muted-foreground"> — 命中: {c.hits.join(", ")}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="flex items-center gap-2 border-t border-border pt-2">
+              <Button size="sm" onClick={handleAdopt} disabled={adopting}>
+                {adopting ? "采纳中…" : "确认采纳"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
+                取消
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                采纳后更新项目绑定 + 记 migration 历史(不写任何文件)
+              </span>
+            </div>
           </div>
-
-          <div className="flex items-center gap-2 border-t border-border pt-2">
-            <Button size="sm" onClick={handleAdopt} disabled={adopting}>
-              {adopting ? "采纳中…" : "确认采纳"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setPreview(null)}>取消</Button>
-            <span className="text-xs text-muted-foreground">采纳后更新项目绑定 + 记 migration 历史(不写任何文件)</span>
-          </div>
-        </div>
-      )}
+        )}
       </div>
     </div>
   );

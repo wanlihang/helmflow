@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -59,9 +59,7 @@ export function FolderPickerDialog({
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(
-        `/api/fs/browse?path=${encodeURIComponent(path)}`,
-      );
+      const res = await fetch(`/api/fs/browse?path=${encodeURIComponent(path)}`);
       const data = await res.json();
       if (!res.ok) {
         setError((data as { error: string }).error);
@@ -126,9 +124,7 @@ export function FolderPickerDialog({
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>选择项目目录</DialogTitle>
-          <DialogDescription>
-            浏览本地文件系统，选择项目的根目录
-          </DialogDescription>
+          <DialogDescription>浏览本地文件系统，选择项目的根目录</DialogDescription>
         </DialogHeader>
 
         {/* 路径输入栏 */}
@@ -212,9 +208,7 @@ export function FolderPickerDialog({
                 onDoubleClick={() => handleEntryDoubleClick(entry)}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm">
-                    {entry.isProject ? "📦" : "📁"}
-                  </span>
+                  <span className="text-sm">{entry.isProject ? "📦" : "📁"}</span>
                   <span className="text-sm truncate">{entry.name}</span>
                   {entry.isProject && (
                     <span className="shrink-0 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
@@ -233,18 +227,14 @@ export function FolderPickerDialog({
                   >
                     选择
                   </button>
-                  {entry.hasChildren && (
-                    <span className="text-xs text-muted-foreground">→</span>
-                  )}
+                  {entry.hasChildren && <span className="text-xs text-muted-foreground">→</span>}
                 </div>
               </div>
             ))}
         </div>
 
         <DialogFooter className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            双击进入子目录，或点击「选择」确认
-          </span>
+          <span className="text-xs text-muted-foreground">双击进入子目录，或点击「选择」确认</span>
           <div className="flex gap-2">
             <DialogClose asChild>
               <Button variant="outline" type="button">

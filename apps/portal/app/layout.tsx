@@ -1,8 +1,8 @@
-import type { Metadata } from "next";
-import type { ReactNode } from "react";
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { RunningBadge } from "@/components/running-badge";
 import { getCurrentProjectId, getProjectList } from "@/lib/project";
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,10 +22,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <div className="flex items-center gap-3">
               <span className="text-lg font-bold tracking-tight">HelmFlow Portal</span>
               <span className="text-sm text-muted-foreground">|</span>
-              <ProjectSwitcher
-                projects={projects}
-                currentProjectId={currentProjectId}
-              />
+              <ProjectSwitcher projects={projects} currentProjectId={currentProjectId} />
             </div>
             <nav className="flex items-center gap-4 text-sm text-muted-foreground">
               <a className="hover:text-foreground" href="/">

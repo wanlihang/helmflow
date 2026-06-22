@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
-import { readdirSync, statSync, existsSync } from "node:fs";
-import { resolve, join, isAbsolute } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,17 +29,11 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   if (!existsSync(absPath)) {
-    return NextResponse.json(
-      { error: `路径不存在: ${rawPath}`, path: absPath },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: `路径不存在: ${rawPath}`, path: absPath }, { status: 404 });
   }
 
   if (!statSync(absPath).isDirectory()) {
-    return NextResponse.json(
-      { error: `不是目录: ${rawPath}`, path: absPath },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: `不是目录: ${rawPath}`, path: absPath }, { status: 400 });
   }
 
   // 列出子目录
@@ -67,10 +61,7 @@ export async function GET(req: Request): Promise<Response> {
       if (!isDirectorySafe(fullPath)) continue;
 
       // 检测是否像是一个可识别的项目
-      const isProject =
-        isJavaProject(fullPath) ||
-        isNodeProject(fullPath) ||
-        isGitRepo(fullPath);
+      const isProject = isJavaProject(fullPath) || isNodeProject(fullPath) || isGitRepo(fullPath);
 
       // 检测是否有子目录（用于显示展开箭头）
       let hasChildren = false;

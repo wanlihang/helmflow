@@ -1,17 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import type { Feature, FeaturePriority } from "@/lib/matrix";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 interface EditFeatureDialogProps {
   open: boolean;
@@ -19,11 +19,7 @@ interface EditFeatureDialogProps {
   feature: Feature;
 }
 
-export function EditFeatureDialog({
-  open,
-  onOpenChange,
-  feature,
-}: EditFeatureDialogProps) {
+export function EditFeatureDialog({ open, onOpenChange, feature }: EditFeatureDialogProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

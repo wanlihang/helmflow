@@ -4,7 +4,21 @@
  * manager(diff/impact/version)是纯计算,本层组合 manager + storage。
  */
 
-import { HelmcodeManager, diffStandards, analyzeImpact, checkUpdateRemote, upgradeTo, type ContractSnapshot, type DiffResult, type ImpactResult, type VersionInfo, type RemoteUpdateInfo, type UpgradeResult } from "@helmflow/helmcode-manager";
+import { readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import {
+  type ContractSnapshot,
+  type DiffResult,
+  HelmcodeManager,
+  type ImpactResult,
+  type RemoteUpdateInfo,
+  type UpgradeResult,
+  type VersionInfo,
+  analyzeImpact,
+  checkUpdateRemote,
+  diffStandards,
+  upgradeTo,
+} from "@helmflow/helmcode-manager";
 import {
   type DB,
   createMigration,
@@ -15,8 +29,6 @@ import {
   listFeatureScenarios,
   updateProjectStandards,
 } from "@helmflow/storage";
-import { readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
 
 export interface PreviewArgs {
   db: DB;
@@ -164,7 +176,10 @@ export function rollbackVersion(db: DB, projectId: string): RollbackOutcome {
     affectedCount: 0,
   });
 
-  return { migrationId: latest.id, message: "已记录回滚(请确认 helmcode 仓库已 git checkout 到旧版)" };
+  return {
+    migrationId: latest.id,
+    message: "已记录回滚(请确认 helmcode 仓库已 git checkout 到旧版)",
+  };
 }
 
 // ---------------------------------------------------------------------------

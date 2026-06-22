@@ -1,9 +1,9 @@
-import { HelmcodeManager } from "@helmflow/helmcode-manager";
-import { listProjectsDb, listMigrations } from "@helmflow/storage";
-import { getProject } from "@helmflow/manifest-loader";
-import { getCurrentProjectId } from "@/lib/project";
-import { getDb } from "@/lib/db";
 import { HelmcodeDriftPanel } from "@/components/helmcode-drift-panel";
+import { getDb } from "@/lib/db";
+import { getCurrentProjectId } from "@/lib/project";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
+import { getProject } from "@helmflow/manifest-loader";
+import { listMigrations, listProjectsDb } from "@helmflow/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +48,18 @@ async function loadPageData(): Promise<PageData> {
   const helmcodeRoot = projectInfo?.helmcodeRoot;
 
   if (!helmcodeRoot) {
-    return { configured: false, helmcodeRoot: null, version: null, preset: null, checksum: null, gitHead: null, projects: [], currentDrift: false, currentBound: false, migrations: [] };
+    return {
+      configured: false,
+      helmcodeRoot: null,
+      version: null,
+      preset: null,
+      checksum: null,
+      gitHead: null,
+      projects: [],
+      currentDrift: false,
+      currentBound: false,
+      migrations: [],
+    };
   }
 
   const preset = projectInfo?.manifest.adapterType ?? "java-ddd";
@@ -102,13 +113,15 @@ export default async function HelmcodePage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">标准版本中心</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          HelmFlow 通过 HelmCode 仓库获取编码标准与 skill。这里展示当前绑定的 HelmCode 版本(控制平面回归第三刀)。
+          HelmFlow 通过 HelmCode 仓库获取编码标准与 skill。这里展示当前绑定的 HelmCode
+          版本(控制平面回归第三刀)。
         </p>
       </div>
 
       {!data.configured ? (
         <div className="rounded-md border border-yellow-300 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-200">
-          ⚠️ 当前项目未配置 <code>helmcode.path</code>(helmcode.yaml)。HelmCode 标准加载、契约生成将不可用。
+          ⚠️ 当前项目未配置 <code>helmcode.path</code>(helmcode.yaml)。HelmCode
+          标准加载、契约生成将不可用。
         </div>
       ) : (
         <>
@@ -116,14 +129,46 @@ export default async function HelmcodePage() {
           <section className="rounded-md border border-border bg-card p-4 space-y-3">
             <h2 className="text-base font-semibold">HelmCode 源(本地)</h2>
             <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-              <Info label="路径" value={<code className="font-mono text-xs">{data.helmcodeRoot}</code>} />
-              <Info label="版本" value={data.version ? <span className="font-mono font-semibold text-green-600">{data.version}</span> : "未知"} />
-              <Info label="标准 preset" value={<code className="font-mono text-xs">{data.preset}</code>} />
-              <Info label="Git HEAD" value={data.gitHead ? <code className="font-mono text-xs">{data.gitHead.slice(0, 12)}</code> : "—"} />
-              <Info label="standards checksum" value={<code className="font-mono text-xs break-all">{data.checksum?.slice(0, 16)}…</code>} />
+              <Info
+                label="路径"
+                value={<code className="font-mono text-xs">{data.helmcodeRoot}</code>}
+              />
+              <Info
+                label="版本"
+                value={
+                  data.version ? (
+                    <span className="font-mono font-semibold text-green-600">{data.version}</span>
+                  ) : (
+                    "未知"
+                  )
+                }
+              />
+              <Info
+                label="标准 preset"
+                value={<code className="font-mono text-xs">{data.preset}</code>}
+              />
+              <Info
+                label="Git HEAD"
+                value={
+                  data.gitHead ? (
+                    <code className="font-mono text-xs">{data.gitHead.slice(0, 12)}</code>
+                  ) : (
+                    "—"
+                  )
+                }
+              />
+              <Info
+                label="standards checksum"
+                value={
+                  <code className="font-mono text-xs break-all">
+                    {data.checksum?.slice(0, 16)}…
+                  </code>
+                }
+              />
             </div>
             <p className="text-xs text-muted-foreground">
-              checksum 是 <code>standards/{data.preset}</code> 全文件内容 sha256 聚合(不含 mtime)。helmcode 改了标准 → checksum 变 → 下方项目 drift 标记。
+              checksum 是 <code>standards/{data.preset}</code> 全文件内容 sha256 聚合(不含
+              mtime)。helmcode 改了标准 → checksum 变 → 下方项目 drift 标记。
             </p>
           </section>
 
@@ -152,23 +197,35 @@ export default async function HelmcodePage() {
                       <tr key={p.id} className="border-b border-border">
                         <td className="px-3 py-2">
                           <span className="font-medium">{p.name}</span>
-                          <span className="ml-2 font-mono text-xs text-muted-foreground">{p.id}</span>
+                          <span className="ml-2 font-mono text-xs text-muted-foreground">
+                            {p.id}
+                          </span>
                         </td>
                         <td className="px-3 py-2 font-mono text-xs">{p.adapterType}</td>
                         <td className="px-3 py-2">
-                          {p.helmcodeVersion
-                            ? <span className="font-mono text-green-600">{p.helmcodeVersion}</span>
-                            : <span className="text-muted-foreground text-xs">未记录(尚未跑过节点)</span>}
+                          {p.helmcodeVersion ? (
+                            <span className="font-mono text-green-600">{p.helmcodeVersion}</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">
+                              未记录(尚未跑过节点)
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                           {p.standardsChecksum ? `${p.standardsChecksum.slice(0, 12)}…` : "—"}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          {p.drift
-                            ? <span className="inline-flex items-center rounded-md bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">⚠ 标准 drift</span>
-                            : p.standardsChecksum
-                              ? <span className="inline-flex items-center rounded-md bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">一致</span>
-                              : <span className="text-xs text-muted-foreground">—</span>}
+                          {p.drift ? (
+                            <span className="inline-flex items-center rounded-md bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
+                              ⚠ 标准 drift
+                            </span>
+                          ) : p.standardsChecksum ? (
+                            <span className="inline-flex items-center rounded-md bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                              一致
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -177,7 +234,8 @@ export default async function HelmcodePage() {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              跑一次需求/代码节点后,对应项目会记录当前 helmcode 版本与 checksum(可追溯「这代码按哪版标准生成」)。
+              跑一次需求/代码节点后,对应项目会记录当前 helmcode 版本与
+              checksum(可追溯「这代码按哪版标准生成」)。
             </p>
           </section>
 
@@ -185,7 +243,9 @@ export default async function HelmcodePage() {
           <section className="space-y-3">
             <h2 className="text-base font-semibold">版本切换历史</h2>
             {data.migrations.length === 0 ? (
-              <p className="text-sm text-muted-foreground">暂无版本切换记录。drift 预览采纳后,这里会留下审计历史。</p>
+              <p className="text-sm text-muted-foreground">
+                暂无版本切换记录。drift 预览采纳后,这里会留下审计历史。
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-xs">
@@ -202,18 +262,28 @@ export default async function HelmcodePage() {
                     {data.migrations.map((m) => (
                       <tr key={m.id} className="border-b border-border">
                         <td className="px-3 py-2">
-                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${
-                            m.action === "adopt" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                          }`}>
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${
+                              m.action === "adopt"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
                             {m.action}
                           </span>
                         </td>
                         <td className="px-3 py-2 font-mono text-muted-foreground">
-                          {m.fromChecksum ?? "—"}{m.fromGitHead ? ` @${m.fromGitHead}` : ""}
+                          {m.fromChecksum ?? "—"}
+                          {m.fromGitHead ? ` @${m.fromGitHead}` : ""}
                         </td>
-                        <td className="px-3 py-2 font-mono">{m.toChecksum}{m.toGitHead ? ` @${m.toGitHead}` : ""}</td>
+                        <td className="px-3 py-2 font-mono">
+                          {m.toChecksum}
+                          {m.toGitHead ? ` @${m.toGitHead}` : ""}
+                        </td>
                         <td className="px-3 py-2">{m.affectedCount}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{new Date(m.createdAt).toLocaleString("zh-CN")}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {new Date(m.createdAt).toLocaleString("zh-CN")}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

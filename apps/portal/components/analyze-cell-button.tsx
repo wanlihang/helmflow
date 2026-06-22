@@ -1,16 +1,16 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  useAnalyzeLog,
-  formatToolEvent,
   type AnalysisResult as AnalysisResultType,
   type AnalyzeGetResponse,
   type AnalyzeSseEvent,
+  formatToolEvent,
+  useAnalyzeLog,
 } from "@/lib/analyze-utils";
-import { parseSseChunk, extractSseData } from "@/lib/sse-parse";
+import { extractSseData, parseSseChunk } from "@/lib/sse-parse";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 interface AnalyzeCellButtonProps {
   cellId: string;
@@ -27,8 +27,7 @@ export function AnalyzeCellButton({ cellId }: AnalyzeCellButtonProps) {
   const lastEventIdRef = useRef<number>(0);
   const activeRunIdRef = useRef<string | null>(null);
 
-  const formatResult = (r: CellResult) =>
-    `${r.oldStatus} → ${r.newStatus}`;
+  const formatResult = (r: CellResult) => `${r.oldStatus} → ${r.newStatus}`;
 
   // ---- On mount: restore latest analyze result from DB ----
   useEffect(() => {
@@ -67,7 +66,9 @@ export function AnalyzeCellButton({ cellId }: AnalyzeCellButtonProps) {
         // ignore — first load failure is non-critical
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
   }, [cellId]);
 
   function replayDbEvent(ev: { payload: Record<string, unknown> }) {
@@ -164,7 +165,9 @@ export function AnalyzeCellButton({ cellId }: AnalyzeCellButtonProps) {
                   appendLog("✅ 分析完成: 状态无变化");
                 }
                 if (event.durationMs != null) {
-                  appendLog(`⏱ 耗时 ${(event.durationMs / 1000).toFixed(1)}s · ${event.turns ?? "?"} turns`);
+                  appendLog(
+                    `⏱ 耗时 ${(event.durationMs / 1000).toFixed(1)}s · ${event.turns ?? "?"} turns`,
+                  );
                 }
                 break;
               case "error":
@@ -202,7 +205,11 @@ export function AnalyzeCellButton({ cellId }: AnalyzeCellButtonProps) {
         setError(`应用失败: ${(data as { error?: string }).error ?? `HTTP ${res.status}`}`);
         return;
       }
-      const data = (await res.json()) as { applied: string[]; skipped: string[]; errors?: string[] };
+      const data = (await res.json()) as {
+        applied: string[];
+        skipped: string[];
+        errors?: string[];
+      };
       if (data.errors && data.errors.length > 0) {
         setError(`应用出错: ${data.errors.join("; ")}`);
         return;

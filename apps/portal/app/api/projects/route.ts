@@ -1,17 +1,17 @@
-import { NextResponse } from "next/server";
-import { existsSync, statSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
-import { resolve, dirname, isAbsolute, basename } from "node:path";
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { getDb } from "@/lib/db";
+import { syncFilesystemProjects } from "@/lib/project";
+import { type CreateManifestInput, createManifest, listProjects } from "@helmflow/manifest-loader";
 import {
+  countFeaturesByProject,
   createProject,
   getProjectById,
   listProjectsDb,
-  countFeaturesByProject,
-  updateProject,
   reactivateProject,
+  updateProject,
 } from "@helmflow/storage";
-import { createManifest, listProjects, type CreateManifestInput } from "@helmflow/manifest-loader";
-import { syncFilesystemProjects } from "@/lib/project";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,10 +63,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
   if (!name || name.length > 200) {
-    return NextResponse.json(
-      { error: "项目名称不能为空,且不超过 200 字符" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "项目名称不能为空,且不超过 200 字符" }, { status: 400 });
   }
   const VALID_ADAPTERS = ["java-ddd", "node-express"];
   if (!VALID_ADAPTERS.includes(adapterType)) {
@@ -76,10 +73,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
   if (!sandboxPath) {
-    return NextResponse.json(
-      { error: "项目路径不能为空" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "项目路径不能为空" }, { status: 400 });
   }
 
   // 支持绝对路径(任意位置)和相对路径(基于 monorepo root)
@@ -134,21 +128,16 @@ export async function POST(req: Request): Promise<Response> {
     sandboxPath,
     adapterType: adapterType as "java-ddd" | "node-express",
     featureMatrixPath,
-    standardsRoot:
-      typeof body.standardsRoot === "string" ? body.standardsRoot : undefined,
+    standardsRoot: typeof body.standardsRoot === "string" ? body.standardsRoot : undefined,
     repoUrl: typeof body.repoUrl === "string" ? body.repoUrl : undefined,
-    description:
-      typeof body.description === "string" ? body.description : undefined,
+    description: typeof body.description === "string" ? body.description : undefined,
   };
 
   let manifestPath: string;
   try {
     manifestPath = createManifest(id, manifestInput);
   } catch (err) {
-    return NextResponse.json(
-      { error: `写入清单失败: ${(err as Error).message}` },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: `写入清单失败: ${(err as Error).message}` }, { status: 500 });
   }
 
   // 创建空 feature matrix

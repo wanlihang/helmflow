@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { AddFeatureDialog } from "@/components/add-feature-dialog";
-import type { Domain, Scenario, ScenarioStatus, FeatureStatus } from "@/lib/matrix";
+import { Badge } from "@/components/ui/badge";
+import type { Domain, FeatureStatus, Scenario, ScenarioStatus } from "@/lib/matrix";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface FeatureMatrixTableProps {
   domain: Domain;
@@ -12,7 +12,9 @@ interface FeatureMatrixTableProps {
   projectId: string;
 }
 
-function getFusedBadge(scenario: Scenario): { type: "scenario"; value: ScenarioStatus } | { type: "agent"; value: FeatureStatus } {
+function getFusedBadge(
+  scenario: Scenario,
+): { type: "scenario"; value: ScenarioStatus } | { type: "agent"; value: FeatureStatus } {
   if (scenario.status === "已支持" || scenario.status === "废弃") {
     return { type: "scenario", value: scenario.status };
   }
@@ -101,7 +103,9 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
                       <button
                         type="button"
                         className="cursor-pointer transition-opacity hover:opacity-70"
-                        onClick={() => router.push(`/features/${feature.id}/${encodeURIComponent(scenarioName)}`)}
+                        onClick={() =>
+                          router.push(`/features/${feature.id}/${encodeURIComponent(scenarioName)}`)
+                        }
                       >
                         {fused.type === "scenario" ? (
                           <Badge scenario={fused.value} />

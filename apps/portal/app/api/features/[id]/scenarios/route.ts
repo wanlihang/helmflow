@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { createScenarioManual, getFeatureRow } from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +27,7 @@ export async function POST(req: Request, ctx: RouteContext): Promise<Response> {
     return NextResponse.json({ error: "场景名称不能为空" }, { status: 400 });
   }
 
-  const scenarioStatus =
-    typeof body.scenarioStatus === "string" ? body.scenarioStatus : "待实现";
+  const scenarioStatus = typeof body.scenarioStatus === "string" ? body.scenarioStatus : "待实现";
 
   const db = getDb();
   const feature = getFeatureRow(db, featureId);

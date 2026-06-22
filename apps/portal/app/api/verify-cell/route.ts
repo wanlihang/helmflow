@@ -1,13 +1,28 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { getDb } from "@/lib/db";
+import {
+  createSseHeartbeat,
+  isString,
+  resolveSandboxPath,
+  sseEncode,
+  sseResponse,
+} from "@/lib/server-utils";
+import { parseContract } from "@helmflow/contract-schema";
+import {
+  createRun,
+  createRunEvent,
+  ensureVirtualCell,
+  getCellRow,
+  getLatestContract,
+  listRunEvents,
+  listRunsByKind,
+  updateRun,
+} from "@helmflow/storage";
 import { NextResponse } from "next/server";
 import { parse as parseYaml } from "yaml";
-import { getLatestContract, getCellRow, listRunsByKind, listRunEvents, createRun, createRunEvent, updateRun, ensureVirtualCell } from "@helmflow/storage";
-import { parseContract } from "@helmflow/contract-schema";
-import { getDb } from "@/lib/db";
-import { isString, sseEncode, sseResponse, resolveSandboxPath, createSseHeartbeat } from "@/lib/server-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,7 +70,8 @@ function runMvnTest(sandboxPath: string): Promise<{ success: boolean; output: st
   })
     .then((result) => ({ success: true, output: result.stdout }))
     .catch((err) => {
-      const output = err instanceof Error && "stdout" in err ? String((err as { stdout: unknown }).stdout) : "";
+      const output =
+        err instanceof Error && "stdout" in err ? String((err as { stdout: unknown }).stdout) : "";
       return { success: false, output };
     });
 }
@@ -93,7 +109,7 @@ export async function GET(req: Request): Promise<Response> {
   const db = getDb();
   const runs = listRunsByKind(db, "verify", 20);
 
-  let matchedRun: typeof runs[number] | undefined;
+  let matchedRun: (typeof runs)[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
 
   for (const r of runs) {
@@ -102,7 +118,9 @@ export async function GET(req: Request): Promise<Response> {
       try {
         const p = JSON.parse(ev.payload);
         return p.type === "verify-start" && p.cellId === cellId;
-      } catch { return false; }
+      } catch {
+        return false;
+      }
     });
     if (startEvent) {
       matchedRun = r;
@@ -120,8 +138,13 @@ export async function GET(req: Request): Promise<Response> {
   for (const ev of [...matchedEvents].reverse()) {
     try {
       const p = JSON.parse(ev.payload);
-      if (p.type === "verify-done") { result = p as Record<string, unknown>; break; }
-    } catch { /* skip */ }
+      if (p.type === "verify-done") {
+        result = p as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      /* skip */
+    }
   }
 
   return NextResponse.json({
@@ -166,7 +189,10 @@ export async function POST(req: Request): Promise<Response> {
   const sandboxPath = await resolveSandboxPath();
 
   if (!existsSync(sandboxPath)) {
-    return NextResponse.json({ error: `project sandbox not found: ${sandboxPath}` }, { status: 500 });
+    return NextResponse.json(
+      { error: `project sandbox not found: ${sandboxPath}` },
+      { status: 500 },
+    );
   }
 
   // 创建 run 记录
@@ -212,7 +238,10 @@ export async function POST(req: Request): Promise<Response> {
 
           sse({ type: "progress", message: "运行 mvn test..." });
           const testResult = await runMvnTest(sandboxPath);
-          sse({ type: "progress", message: testResult.success ? "mvn test 通过" : "mvn test 有失败" });
+          sse({
+            type: "progress",
+            message: testResult.success ? "mvn test 通过" : "mvn test 有失败",
+          });
 
           const surefireResults = parseSurefireResults(sandboxPath);
 
@@ -227,7 +256,7 @@ export async function POST(req: Request): Promise<Response> {
             });
             return {
               acId,
-              status: allPass ? "pass" as const : "fail" as const,
+              status: allPass ? ("pass" as const) : ("fail" as const),
               testClass: mapping.tests[0]?.file,
             };
           });
@@ -246,11 +275,19 @@ export async function POST(req: Request): Promise<Response> {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           sse({ type: "error", message });
-          try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
+          try {
+            updateRun(db, run.id, "failed");
+          } catch {
+            /* ignore */
+          }
         }
       } finally {
         stopHb();
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
     cancel() {

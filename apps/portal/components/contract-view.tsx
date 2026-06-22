@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import type { Contract } from "@helmflow/contract-schema";
 import type { HelmcodeContractMeta } from "@helmflow/contract-sync";
+import { useState } from "react";
 
 interface ContractViewProps {
   contract: Contract;
@@ -45,7 +45,10 @@ export function ContractView({ contract, rawMarkdown }: ContractViewProps) {
           </h3>
           <ul className="space-y-1">
             {contract.acceptanceCriteria.map((ac) => (
-              <li key={ac.id} className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed">
+              <li
+                key={ac.id}
+                className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed"
+              >
                 <span className="inline-block rounded bg-blue-100 text-blue-700 px-1.5 py-0.5 font-mono font-semibold mr-2">
                   {ac.id}
                 </span>
@@ -144,13 +147,18 @@ const HC_STATUS_BADGE: Record<string, string> = {
   draft: "bg-gray-100 text-gray-600",
 };
 
-export function ContractFallbackView({ meta, rawMarkdown }: { meta: HelmcodeContractMeta; rawMarkdown: string }) {
+export function ContractFallbackView({
+  meta,
+  rawMarkdown,
+}: { meta: HelmcodeContractMeta; rawMarkdown: string }) {
   return (
     <div className="space-y-3">
       <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono font-semibold">{meta.featureId}</span>
-          <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${HC_STATUS_BADGE[meta.status] ?? "bg-gray-100 text-gray-600"}`}>
+          <span
+            className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${HC_STATUS_BADGE[meta.status] ?? "bg-gray-100 text-gray-600"}`}
+          >
             {meta.status}
           </span>
           {meta.domain && (

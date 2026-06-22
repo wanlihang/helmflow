@@ -1,20 +1,20 @@
 "use client";
 
-import { useState, useCallback, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { FolderPickerDialog } from "@/components/folder-picker-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogTrigger,
+  DialogClose,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { FolderPickerDialog } from "@/components/folder-picker-dialog";
+import { Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useCallback, useState } from "react";
 
 const ADAPTER_OPTIONS = [
   { value: "java-ddd", label: "Java DDD (Maven)" },
@@ -106,8 +106,8 @@ export function RegisterProjectDialog() {
       setForm((prev) => ({
         ...prev,
         projectPath: path,
-        id: userEditedFields.has("id") ? prev.id : (prev.id || id),
-        name: userEditedFields.has("name") ? prev.name : (prev.name || name),
+        id: userEditedFields.has("id") ? prev.id : prev.id || id,
+        name: userEditedFields.has("name") ? prev.name : prev.name || name,
       }));
     },
     [userEditedFields],
@@ -201,9 +201,7 @@ export function RegisterProjectDialog() {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>注册新项目</DialogTitle>
-          <DialogDescription>
-            输入项目路径，HelmFlow 将自动识别并接入项目
-          </DialogDescription>
+          <DialogDescription>输入项目路径，HelmFlow 将自动识别并接入项目</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -241,10 +239,7 @@ export function RegisterProjectDialog() {
 
           {/* 适配器类型 */}
           <div>
-            <label
-              className="block text-sm font-medium"
-              htmlFor="reg-adapter"
-            >
+            <label className="block text-sm font-medium" htmlFor="reg-adapter">
               适配器类型 <span className="text-red-500">*</span>
             </label>
             <select
@@ -287,11 +282,7 @@ export function RegisterProjectDialog() {
               仅限小写字母、数字、连字符,2-64 字符
               {idHint && (
                 <span
-                  className={
-                    idHint.startsWith("✓")
-                      ? "ml-2 text-green-600"
-                      : "ml-2 text-red-600"
-                  }
+                  className={idHint.startsWith("✓") ? "ml-2 text-green-600" : "ml-2 text-red-600"}
                 >
                   {idHint}
                 </span>
@@ -327,7 +318,10 @@ export function RegisterProjectDialog() {
             <div className="space-y-3 p-3">
               {/* Feature Matrix 路径 */}
               <div>
-                <label className="block text-xs font-medium text-muted-foreground" htmlFor="reg-matrix">
+                <label
+                  className="block text-xs font-medium text-muted-foreground"
+                  htmlFor="reg-matrix"
+                >
                   Feature Matrix 路径
                 </label>
                 <input
@@ -346,7 +340,10 @@ export function RegisterProjectDialog() {
 
               {/* 编码规范目录 */}
               <div>
-                <label className="block text-xs font-medium text-muted-foreground" htmlFor="reg-std">
+                <label
+                  className="block text-xs font-medium text-muted-foreground"
+                  htmlFor="reg-std"
+                >
                   编码规范目录
                 </label>
                 <input
@@ -361,7 +358,10 @@ export function RegisterProjectDialog() {
 
               {/* Git 仓库地址 */}
               <div>
-                <label className="block text-xs font-medium text-muted-foreground" htmlFor="reg-repo">
+                <label
+                  className="block text-xs font-medium text-muted-foreground"
+                  htmlFor="reg-repo"
+                >
                   Git 仓库地址
                 </label>
                 <input
@@ -377,7 +377,10 @@ export function RegisterProjectDialog() {
 
               {/* 项目描述 */}
               <div>
-                <label className="block text-xs font-medium text-muted-foreground" htmlFor="reg-desc">
+                <label
+                  className="block text-xs font-medium text-muted-foreground"
+                  htmlFor="reg-desc"
+                >
                   项目描述
                 </label>
                 <textarea
@@ -425,11 +428,7 @@ export function RegisterProjectDialog() {
               type="submit"
               disabled={submitting || !form.projectPath.trim() || !form.id.trim()}
             >
-              {submitting
-                ? "注册中..."
-                : form.analyzeAfterRegister
-                  ? "注册并分析"
-                  : "注册项目"}
+              {submitting ? "注册中..." : form.analyzeAfterRegister ? "注册并分析" : "注册项目"}
             </Button>
           </DialogFooter>
         </form>

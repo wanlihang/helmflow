@@ -1,15 +1,15 @@
 import { existsSync } from "node:fs";
-import { NextResponse } from "next/server";
-import { getContractById } from "@helmflow/storage";
-import {
-  runOrchestrator,
-  createRunEmitter,
-  emitEvent,
-  type OrchestratorEvent,
-} from "@helmflow/orchestrator";
 import { getDb } from "@/lib/db";
 import { guardCellOperable } from "@/lib/guard";
-import { isString, resolveSandboxPath, resolveHelmcodeRoot } from "@/lib/server-utils";
+import { isString, resolveHelmcodeRoot, resolveSandboxPath } from "@/lib/server-utils";
+import {
+  type OrchestratorEvent,
+  createRunEmitter,
+  emitEvent,
+  runOrchestrator,
+} from "@helmflow/orchestrator";
+import { getContractById } from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,19 +26,13 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   if (!isString(body.contractId) || body.contractId.length === 0) {
-    return NextResponse.json(
-      { error: "contractId is required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "contractId is required" }, { status: 400 });
   }
 
   const db = getDb();
   const contract = getContractById(db, body.contractId);
   if (!contract) {
-    return NextResponse.json(
-      { error: `Contract not found: ${body.contractId}` },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: `Contract not found: ${body.contractId}` }, { status: 404 });
   }
   if (contract.status !== "approved") {
     return NextResponse.json(

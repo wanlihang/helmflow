@@ -1,6 +1,6 @@
-import { forwardRef, type ButtonHTMLAttributes } from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { cn } from "@/lib/utils";
+import { Slot } from "@radix-ui/react-slot";
+import { type ButtonHTMLAttributes, forwardRef } from "react";
 
 export type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
 export type ButtonSize = "default" | "sm" | "lg";

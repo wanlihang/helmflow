@@ -1,26 +1,26 @@
-import { NextResponse } from "next/server";
-import { runNode, runClassify } from "@helmflow/agent-runner";
-import { scanJavaInventory, type InventoryItem } from "@helmflow/adapter-java-ddd";
+import { readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { getDb } from "@/lib/db";
+import { type Feature, type Scenario, getFeature, loadMatrix } from "@/lib/matrix";
+import { getCurrentProjectId } from "@/lib/project";
+import { isString, resolveSandboxPath, sseEncode, sseResponse } from "@/lib/server-utils";
+import { type InventoryItem, scanJavaInventory } from "@helmflow/adapter-java-ddd";
+import { runClassify, runNode } from "@helmflow/agent-runner";
 import {
-  getCellRow,
   createRun,
   createRunEvent,
-  updateRun,
   ensureVirtualCell,
-  updateCellAgentStatus,
-  updateFeatureScenarioStatus,
-  updateFeatureImplementation,
-  listRunEvents,
-  getRunById,
-  listRunsByKind,
+  getCellRow,
   getLatestContract,
+  getRunById,
+  listRunEvents,
+  listRunsByKind,
+  updateCellAgentStatus,
+  updateFeatureImplementation,
+  updateFeatureScenarioStatus,
+  updateRun,
 } from "@helmflow/storage";
-import { getDb } from "@/lib/db";
-import { loadMatrix, getFeature, type Feature, type Scenario } from "@/lib/matrix";
-import { getCurrentProjectId } from "@/lib/project";
-import { isString, sseEncode, sseResponse, resolveSandboxPath } from "@/lib/server-utils";
-import { isAbsolute, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,7 +117,11 @@ function loadContractMd(db: ReturnType<typeof getDb>, cellId: string): string | 
   }
 }
 
-function buildClassifyPrompt(inventory: InventoryItem[], cells: CellInfo[], contracts: Map<string, string>): string {
+function buildClassifyPrompt(
+  inventory: InventoryItem[],
+  cells: CellInfo[],
+  contracts: Map<string, string>,
+): string {
   const inventoryJson = JSON.stringify(inventory, null, 2);
 
   const cellLines = cells.map((c) => {
@@ -234,13 +238,12 @@ export async function GET(req: Request): Promise<Response> {
   const cellId = url.searchParams.get("cellId");
   const afterIdStr = url.searchParams.get("afterId");
   const afterId = afterIdStr ? Number(afterIdStr) : undefined;
-  const validAfterId = afterId !== undefined && Number.isFinite(afterId) && afterId > 0 ? afterId : undefined;
+  const validAfterId =
+    afterId !== undefined && Number.isFinite(afterId) && afterId > 0 ? afterId : undefined;
 
   // Find the most recent analyze run (optionally filtered by cellId)
   const analyzeRuns = listRunsByKind(db, "analyze", 50);
-  const filtered = cellId
-    ? analyzeRuns.filter((r) => r.cellId === cellId)
-    : analyzeRuns;
+  const filtered = cellId ? analyzeRuns.filter((r) => r.cellId === cellId) : analyzeRuns;
   const latestRun = filtered[0];
 
   if (!latestRun) {
@@ -258,7 +261,9 @@ export async function GET(req: Request): Promise<Response> {
         results.push(...payload.results);
         break;
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
 
   return NextResponse.json({
@@ -296,114 +301,125 @@ export async function POST(req: Request): Promise<Response> {
     const matrix = loadMatrix(projectId);
     const db = getDb();
 
-  // ---- Collect cells to analyze ----
-  let cellsToAnalyze: CellInfo[] = [];
+    // ---- Collect cells to analyze ----
+    const cellsToAnalyze: CellInfo[] = [];
 
-  if (scope === "cell" && isString(body.cellId)) {
-    const row = getCellRow(db, body.cellId);
-    if (!row) {
-      return NextResponse.json({ error: `Cell not found: ${body.cellId}` }, { status: 404 });
-    }
-    if (row.scenarioStatus === "废弃") {
-      return NextResponse.json({ results: [], message: "废弃格子跳过分析" });
-    }
-    const feature = getFeature(row.featureId, projectId);
-    if (feature) {
-      const scenario = feature.scenarios.find((s) => s.name === row.scenarioName);
-      if (scenario) {
-        cellsToAnalyze.push({ cellId: body.cellId, feature, scenario });
+    if (scope === "cell" && isString(body.cellId)) {
+      const row = getCellRow(db, body.cellId);
+      if (!row) {
+        return NextResponse.json({ error: `Cell not found: ${body.cellId}` }, { status: 404 });
       }
-    }
-  } else if (scope === "domain" && isString(body.domainId)) {
-    const domain = matrix.domains.find((d) => d.id === body.domainId);
-    if (!domain) {
-      return NextResponse.json({ error: `Domain not found: ${body.domainId}` }, { status: 404 });
-    }
-    for (const f of domain.features) {
-      for (const s of f.scenarios) {
-        if (s.status !== "废弃") {
-          cellsToAnalyze.push({ cellId: `${f.id}__${s.name}`, feature: f, scenario: s });
+      if (row.scenarioStatus === "废弃") {
+        return NextResponse.json({ results: [], message: "废弃格子跳过分析" });
+      }
+      const feature = getFeature(row.featureId, projectId);
+      if (feature) {
+        const scenario = feature.scenarios.find((s) => s.name === row.scenarioName);
+        if (scenario) {
+          cellsToAnalyze.push({ cellId: body.cellId, feature, scenario });
         }
       }
-    }
-  } else {
-    for (const d of matrix.domains) {
-      for (const f of d.features) {
+    } else if (scope === "domain" && isString(body.domainId)) {
+      const domain = matrix.domains.find((d) => d.id === body.domainId);
+      if (!domain) {
+        return NextResponse.json({ error: `Domain not found: ${body.domainId}` }, { status: 404 });
+      }
+      for (const f of domain.features) {
         for (const s of f.scenarios) {
           if (s.status !== "废弃") {
             cellsToAnalyze.push({ cellId: `${f.id}__${s.name}`, feature: f, scenario: s });
           }
         }
       }
-    }
-  }
-
-  if (cellsToAnalyze.length === 0) {
-    return NextResponse.json({ results: [], message: "No cells to analyze" });
-  }
-
-  const sandboxPath = await resolveSandboxPath();
-
-  // Create a run record for persistence
-  // 注意：runs.cellId 有 FK 约束引用 feature_scenarios.id，必须使用真实存在的 cellId
-  const runCellId = scope === "cell" && isString(body.cellId) ? body.cellId : cellsToAnalyze[0].cellId;
-  const run = createRun(db, runCellId, "analyze");
-
-  const encoder = new TextEncoder();
-  const HEARTBEAT_MS = 15_000;
-  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      // SSE heartbeat — keep connection alive during long agent pauses
-      heartbeatTimer = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": heartbeat\n\n"));
-        } catch {
-          clearInterval(heartbeatTimer);
+    } else {
+      for (const d of matrix.domains) {
+        for (const f of d.features) {
+          for (const s of f.scenarios) {
+            if (s.status !== "废弃") {
+              cellsToAnalyze.push({ cellId: `${f.id}__${s.name}`, feature: f, scenario: s });
+            }
+          }
         }
-      }, HEARTBEAT_MS);
-
-      const sse = (payload: unknown) => {
-        // 先持久化(独立 try),再 enqueue —— 确保 error/异常路径下事件不丢(运行中心可诊断)
-        try {
-          createRunEvent(db, run.id, (payload as { type: string }).type, payload);
-        } catch {
-          // DB write failure should not block the stream
-        }
-        try {
-          controller.enqueue(sseEncode(encoder, payload));
-        } catch {
-          // controller 已关闭(stream 中断),事件已落库不丢
-        }
-      };
-
-      try {
-        if (scope === "cell") {
-          await runCellAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
-        } else {
-          await runBulkAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        try {
-          controller.enqueue(sseEncode(encoder, { type: "error", message: msg }));
-        } catch { /* already closed */ }
-      } finally {
-        clearInterval(heartbeatTimer);
-        try { controller.close(); } catch { /* already closed */ }
       }
-    },
-    cancel() {
-      clearInterval(heartbeatTimer);
-    },
-  });
+    }
 
-  return sseResponse(stream);
+    if (cellsToAnalyze.length === 0) {
+      return NextResponse.json({ results: [], message: "No cells to analyze" });
+    }
+
+    const sandboxPath = await resolveSandboxPath();
+
+    // Create a run record for persistence
+    // 注意：runs.cellId 有 FK 约束引用 feature_scenarios.id，必须使用真实存在的 cellId
+    const runCellId =
+      scope === "cell" && isString(body.cellId) ? body.cellId : cellsToAnalyze[0].cellId;
+    const run = createRun(db, runCellId, "analyze");
+
+    const encoder = new TextEncoder();
+    const HEARTBEAT_MS = 15_000;
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        // SSE heartbeat — keep connection alive during long agent pauses
+        heartbeatTimer = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": heartbeat\n\n"));
+          } catch {
+            clearInterval(heartbeatTimer);
+          }
+        }, HEARTBEAT_MS);
+
+        const sse = (payload: unknown) => {
+          // 先持久化(独立 try),再 enqueue —— 确保 error/异常路径下事件不丢(运行中心可诊断)
+          try {
+            createRunEvent(db, run.id, (payload as { type: string }).type, payload);
+          } catch {
+            // DB write failure should not block the stream
+          }
+          try {
+            controller.enqueue(sseEncode(encoder, payload));
+          } catch {
+            // controller 已关闭(stream 中断),事件已落库不丢
+          }
+        };
+
+        try {
+          if (scope === "cell") {
+            await runCellAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
+          } else {
+            await runBulkAnalysis(cellsToAnalyze, sandboxPath, db, run, sse);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          try {
+            controller.enqueue(sseEncode(encoder, { type: "error", message: msg }));
+          } catch {
+            /* already closed */
+          }
+        } finally {
+          clearInterval(heartbeatTimer);
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
+      cancel() {
+        clearInterval(heartbeatTimer);
+      },
+    });
+
+    return sseResponse(stream);
   } catch (err) {
     // 顶层兜底：捕获 import / 初始化阶段异常，返回可读错误
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[analyze-status POST] Unhandled error:", message, err instanceof Error ? err.stack : "");
+    console.error(
+      "[analyze-status POST] Unhandled error:",
+      message,
+      err instanceof Error ? err.stack : "",
+    );
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -426,7 +442,8 @@ async function runCellAnalysis(
     if (md) contracts.set(c.cellId, md);
   }
   const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze, contracts);
-  const systemPrompt = "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
+  const systemPrompt =
+    "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
 
   sse({ type: "analyze-start", runId: run.id, totalCells: cellsToAnalyze.length, scope: "cell" });
 
@@ -479,16 +496,28 @@ async function runCellAnalysis(
       const existing = getCellRow(db, r.cellId);
       if (!existing) continue;
       updateFeatureScenarioStatus(db, r.featureId, r.scenarioName, r.newStatus);
-      if (existing.scenarioStatus === "已支持" && (r.newStatus === "需改造" || r.newStatus === "待实现")) {
+      if (
+        existing.scenarioStatus === "已支持" &&
+        (r.newStatus === "需改造" || r.newStatus === "待实现")
+      ) {
         updateCellAgentStatus(db, r.cellId, "not-started");
       }
     }
 
     updateRun(db, run.id, "done");
-    sse({ type: "analyze-done", results, turns: nodeResult.turns, durationMs: nodeResult.durationMs });
+    sse({
+      type: "analyze-done",
+      results,
+      turns: nodeResult.turns,
+      durationMs: nodeResult.durationMs,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
+    try {
+      updateRun(db, run.id, "failed");
+    } catch {
+      /* ignore */
+    }
     sse({ type: "error", message });
   }
 }
@@ -504,7 +533,13 @@ async function runBulkAnalysis(
   run: { id: string },
   sse: (payload: unknown) => void,
 ): Promise<void> {
-  sse({ type: "analyze-start", runId: run.id, totalCells: cellsToAnalyze.length, scope: "bulk", phase: "scan" });
+  sse({
+    type: "analyze-start",
+    runId: run.id,
+    totalCells: cellsToAnalyze.length,
+    scope: "bulk",
+    phase: "scan",
+  });
 
   // ---- Phase 1: 确定性脚本扫描(秒级,零 LLM 成本,不撞 turn) ----
   let inventory: InventoryItem[] = [];
@@ -526,14 +561,20 @@ async function runBulkAnalysis(
     try {
       const scanResult = await runNode({
         cwd: sandboxPath,
-        systemPrompt: "You are a code scanner. Scan Java source files and produce a structured inventory. Use Glob to find **/src/main/java/**/*.java. Handle single-module and multi-module Maven projects. Be thorough.",
+        systemPrompt:
+          "You are a code scanner. Scan Java source files and produce a structured inventory. Use Glob to find **/src/main/java/**/*.java. Handle single-module and multi-module Maven projects. Be thorough.",
         userPrompt: buildScanPrompt(),
         allowedTools: ["Read", "Bash"],
         maxTurns: 20,
         onEvent: (event) => {
-          if (event.type === "assistant.text") { collectedText.push(event.text); sse({ type: "token", text: event.text }); }
-          else if (event.type === "tool_use") { sse({ type: "tool_use", name: event.name, input: event.input }); }
-          else if (event.type === "tool_result") { sse({ type: "tool_result", isError: event.isError, preview: event.preview }); }
+          if (event.type === "assistant.text") {
+            collectedText.push(event.text);
+            sse({ type: "token", text: event.text });
+          } else if (event.type === "tool_use") {
+            sse({ type: "tool_use", name: event.name, input: event.input });
+          } else if (event.type === "tool_result") {
+            sse({ type: "tool_result", isError: event.isError, preview: event.preview });
+          }
         },
       });
       scanDurationMs = Date.now() - scanStart;
@@ -545,14 +586,24 @@ async function runBulkAnalysis(
       inventory = parseInventoryOutput(collectedText.join(""));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
+      try {
+        updateRun(db, run.id, "failed");
+      } catch {
+        /* ignore */
+      }
       sse({ type: "error", message });
       return;
     }
   }
 
   // scan-done(脚本 inventory 缓存到 event,classify 复用)
-  sse({ type: "scan-done", inventory, scanDurationMs, fallback: scanFallback, inventorySize: inventory.length });
+  sse({
+    type: "scan-done",
+    inventory,
+    scanDurationMs,
+    fallback: scanFallback,
+    inventorySize: inventory.length,
+  });
 
   // inventory 仍空 → 最终降级全量 prompt
   if (inventory.length === 0) {
@@ -563,10 +614,14 @@ async function runBulkAnalysis(
   // ---- Phase 2: per-cell classify(拆分!每 cell 独立 run,故障隔离) ----
   sse({ type: "classify-start", cellCount: cellsToAnalyze.length, perCell: true });
   const allResults: AnalysisResult[] = [];
-  const classifySystemPrompt = "You are a precise status classifier. 优先对照该 cell 的行为契约判断:用契约的 BR/AC 作为「实现该满足什么」的权威,在 inventory(代码清单)中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,在 inventory 中确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时回退纯 inventory 语义匹配。输出仍为 <ANALYSIS_RESULT> 标签包裹的 JSON 数组,只输出该数组。";
+  const classifySystemPrompt =
+    "You are a precise status classifier. 优先对照该 cell 的行为契约判断:用契约的 BR/AC 作为「实现该满足什么」的权威,在 inventory(代码清单)中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,在 inventory 中确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时回退纯 inventory 语义匹配。输出仍为 <ANALYSIS_RESULT> 标签包裹的 JSON 数组,只输出该数组。";
 
   /** 529 限流自动重试(指数退避: 3s→6s→12s, 最多 3 次) */
-  async function runClassifyWithRetry(opts: { cwd: string; systemPrompt: string; userPrompt: string }, sseFn: (p: unknown) => void): Promise<{ text: string; durationMs: number }> {
+  async function runClassifyWithRetry(
+    opts: { cwd: string; systemPrompt: string; userPrompt: string },
+    sseFn: (p: unknown) => void,
+  ): Promise<{ text: string; durationMs: number }> {
     const MAX_RETRIES = 3;
     const delays = [3000, 6000, 12000];
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -576,7 +631,13 @@ async function runBulkAnalysis(
         const msg = err instanceof Error ? err.message : String(err);
         // 529 = GLM 限流,可重试;其他错误直接抛
         if (!msg.includes("529") || attempt === MAX_RETRIES) throw err;
-        sseFn({ type: "classify-retry", attempt: attempt + 1, maxRetries: MAX_RETRIES, delay: delays[attempt], reason: "GLM 529 限流" });
+        sseFn({
+          type: "classify-retry",
+          attempt: attempt + 1,
+          maxRetries: MAX_RETRIES,
+          delay: delays[attempt],
+          reason: "GLM 529 限流",
+        });
         await new Promise((r) => setTimeout(r, delays[attempt]!));
       }
     }
@@ -597,23 +658,35 @@ async function runBulkAnalysis(
     const cellSse = (payload: unknown) => {
       sse(payload); // 写到主 run(总览用)
       if (cellRun) {
-        try { createRunEvent(db, cellRun.id, (payload as { type: string }).type, payload); } catch { /* ignore */ }
+        try {
+          createRunEvent(db, cellRun.id, (payload as { type: string }).type, payload);
+        } catch {
+          /* ignore */
+        }
       }
     };
     try {
       cellRun = createRun(db, cell.cellId, "analyze");
-      cellSse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id, progress: `${cellIdx + 1}/${cellsToAnalyze.length}` });
+      cellSse({
+        type: "classify-cell-start",
+        cellId: cell.cellId,
+        runId: cellRun.id,
+        progress: `${cellIdx + 1}/${cellsToAnalyze.length}`,
+      });
 
       // 读取该 cell 的行为契约(若已建立映射),作为 classify 的权威依据注入 prompt
       const contracts = new Map<string, string>();
       const contractMd = loadContractMd(db, cell.cellId);
       if (contractMd) contracts.set(cell.cellId, contractMd);
 
-      const classifyResult = await runClassifyWithRetry({
-        cwd: sandboxPath,
-        systemPrompt: classifySystemPrompt,
-        userPrompt: buildClassifyPrompt(inventory, [cell], contracts),
-      }, cellSse);
+      const classifyResult = await runClassifyWithRetry(
+        {
+          cwd: sandboxPath,
+          systemPrompt: classifySystemPrompt,
+          userPrompt: buildClassifyPrompt(inventory, [cell], contracts),
+        },
+        cellSse,
+      );
       const parsed = parseAnalysisOutput(classifyResult.text);
 
       // 写回分层归属(独立于状态变更)
@@ -634,23 +707,44 @@ async function runBulkAnalysis(
         const existing = getCellRow(db, r.cellId);
         if (!existing) continue;
         updateFeatureScenarioStatus(db, r.featureId, r.scenarioName, r.newStatus);
-        if (existing.scenarioStatus === "已支持" && (r.newStatus === "需改造" || r.newStatus === "待实现")) {
+        if (
+          existing.scenarioStatus === "已支持" &&
+          (r.newStatus === "需改造" || r.newStatus === "待实现")
+        ) {
           updateCellAgentStatus(db, r.cellId, "not-started");
         }
       }
       allResults.push(...results);
       updateRun(db, cellRun.id, "done");
-      cellSse({ type: "classify-cell-done", cellId: cell.cellId, runId: cellRun.id, results, durationMs: classifyResult.durationMs });
+      cellSse({
+        type: "classify-cell-done",
+        cellId: cell.cellId,
+        runId: cellRun.id,
+        results,
+        durationMs: classifyResult.durationMs,
+      });
     } catch (err) {
       // 单 cell 失败不影响其他 cell(故障隔离)
       const message = err instanceof Error ? err.message : String(err);
-      if (cellRun) { try { updateRun(db, cellRun.id, "failed"); } catch { /* ignore */ } }
+      if (cellRun) {
+        try {
+          updateRun(db, cellRun.id, "failed");
+        } catch {
+          /* ignore */
+        }
+      }
       cellSse({ type: "classify-cell-failed", cellId: cell.cellId, message });
     }
   }
 
   updateRun(db, run.id, "done");
-  sse({ type: "analyze-done", results: allResults, scanDurationMs, inventorySize: inventory.length, perCell: true });
+  sse({
+    type: "analyze-done",
+    results: allResults,
+    scanDurationMs,
+    inventorySize: inventory.length,
+    perCell: true,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -673,7 +767,8 @@ async function runFallbackBulkAnalysis(
     if (md) contracts.set(c.cellId, md);
   }
   const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze, contracts);
-  const systemPrompt = "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
+  const systemPrompt =
+    "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
 
   const collectedText: string[] = [];
   const nodeResult = await runNode({
@@ -704,7 +799,13 @@ async function runFallbackBulkAnalysis(
   const parsed = parseAnalysisOutput(fullText);
   const results = buildAnalysisResults(parsed, cellsToAnalyze);
   updateRun(db, run.id, "done");
-  sse({ type: "analyze-done", results, turns: nodeResult.turns, durationMs: nodeResult.durationMs, fallback: true });
+  sse({
+    type: "analyze-done",
+    results,
+    turns: nodeResult.turns,
+    durationMs: nodeResult.durationMs,
+    fallback: true,
+  });
 }
 
 // ---------------------------------------------------------------------------

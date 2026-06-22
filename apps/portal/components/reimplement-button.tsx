@@ -1,8 +1,8 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 
 interface ReimplementButtonProps {
   cellId: string;
@@ -40,7 +40,9 @@ export function ReimplementButton({ cellId }: ReimplementButtonProps) {
     return (
       <div className="flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">确定重新实现？将重置为「需改造」状态</span>
+          <span className="text-xs text-muted-foreground">
+            确定重新实现？将重置为「需改造」状态
+          </span>
           <Button size="sm" variant="destructive" onClick={handleConfirm} disabled={submitting}>
             {submitting ? "处理中..." : "确认"}
           </Button>

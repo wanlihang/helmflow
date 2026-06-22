@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { confirmManualMapping } from "@/lib/contract-sync-actions";
 import { getDb } from "@/lib/db";
 import { getCurrentProjectId } from "@/lib/project";
-import { confirmManualMapping } from "@/lib/contract-sync-actions";
 import type { HelmcodeStatus } from "@helmflow/contract-sync";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,12 +14,7 @@ interface ConfirmBody {
   scenarioName?: unknown;
 }
 
-const VALID_STATUS = new Set<HelmcodeStatus>([
-  "draft",
-  "approved",
-  "goal-running",
-  "done",
-]);
+const VALID_STATUS = new Set<HelmcodeStatus>(["draft", "approved", "goal-running", "done"]);
 
 // POST /api/contract-sync/confirm — 人工指认 pending 项 → 写映射 + apply + 标 matched
 export async function POST(req: Request): Promise<Response> {

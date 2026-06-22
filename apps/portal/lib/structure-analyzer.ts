@@ -162,10 +162,7 @@ export function buildScanPrompt(): string {
 // Phase 2 Prompt: 推断域 / 功能点 / 场景
 // ---------------------------------------------------------------------------
 
-export function buildInferPrompt(
-  inventory: ScannedClass[],
-  handlers: ScannedHandler[],
-): string {
+export function buildInferPrompt(inventory: ScannedClass[], handlers: ScannedHandler[]): string {
   const inventoryJson = JSON.stringify(inventory, null, 2);
   const handlersJson = JSON.stringify(handlers, null, 2);
 
@@ -344,32 +341,32 @@ export function parseHandlerOutput(text: string): ScannedHandler[] {
     if (fence?.[1]) raw = fence[1].trim();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item: unknown): item is Record<string, unknown> =>
-        typeof item === "object" && item !== null && "className" in item,
-    ).map((item) => ({
-      className: String(item.className ?? ""),
-      qualifiedName: String(item.qualifiedName ?? ""),
-      packageName: String(item.packageName ?? ""),
-      methods: Array.isArray(item.methods) ? item.methods as string[] : [],
-      // 兼容旧字段 branchConditions 和新字段 businessDimensions
-      businessDimensions: Array.isArray(item.businessDimensions)
-        ? item.businessDimensions as string[]
-        : Array.isArray(item.branchConditions)
-          ? item.branchConditions as string[]
-          : [],
-      calledActions: Array.isArray(item.calledActions) ? item.calledActions as string[] : [],
-      linesOfCode: typeof item.linesOfCode === "number" ? item.linesOfCode : 0,
-      hasRealLogic: typeof item.hasRealLogic === "boolean" ? item.hasRealLogic : true,
-    }));
+    return parsed
+      .filter(
+        (item: unknown): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null && "className" in item,
+      )
+      .map((item) => ({
+        className: String(item.className ?? ""),
+        qualifiedName: String(item.qualifiedName ?? ""),
+        packageName: String(item.packageName ?? ""),
+        methods: Array.isArray(item.methods) ? (item.methods as string[]) : [],
+        // 兼容旧字段 branchConditions 和新字段 businessDimensions
+        businessDimensions: Array.isArray(item.businessDimensions)
+          ? (item.businessDimensions as string[])
+          : Array.isArray(item.branchConditions)
+            ? (item.branchConditions as string[])
+            : [],
+        calledActions: Array.isArray(item.calledActions) ? (item.calledActions as string[]) : [],
+        linesOfCode: typeof item.linesOfCode === "number" ? item.linesOfCode : 0,
+        hasRealLogic: typeof item.hasRealLogic === "boolean" ? item.hasRealLogic : true,
+      }));
   } catch {
     return [];
   }
 }
 
-export function parseStructureResult(
-  text: string,
-): StructureAnalysisResult | null {
+export function parseStructureResult(text: string): StructureAnalysisResult | null {
   const match = text.match(/<STRUCTURE_RESULT>([\s\S]*?)<\/STRUCTURE_RESULT>/);
   if (!match?.[1]) return null;
   try {

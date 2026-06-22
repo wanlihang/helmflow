@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { extractSseData, parseSseChunk } from "@/lib/sse-parse";
 import { useRouter } from "next/navigation";
-import { parseSseChunk, extractSseData } from "@/lib/sse-parse";
+import { useCallback, useEffect, useState } from "react";
 
 interface ConversationTurn {
   role: "input" | "assistant" | "tool" | "result";
@@ -95,7 +95,9 @@ interface ConversationViewProps {
 export function ConversationView({ runId }: ConversationViewProps) {
   const router = useRouter();
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
-  const [sseStatus, setSseStatus] = useState<"connecting" | "streaming" | "done" | "offline">("connecting");
+  const [sseStatus, setSseStatus] = useState<"connecting" | "streaming" | "done" | "offline">(
+    "connecting",
+  );
   const [injectInput, setInjectInput] = useState("");
   const [injecting, setInjecting] = useState(false);
   const [injectError, setInjectError] = useState<string | null>(null);
@@ -124,9 +126,10 @@ export function ConversationView({ runId }: ConversationViewProps) {
     const connect = async () => {
       try {
         setSseStatus("connecting");
-        const streamUrl = afterId > 0
-          ? `/api/runs/${runId}/stream?afterId=${afterId}`
-          : `/api/runs/${runId}/stream`;
+        const streamUrl =
+          afterId > 0
+            ? `/api/runs/${runId}/stream?afterId=${afterId}`
+            : `/api/runs/${runId}/stream`;
         const res = await fetch(streamUrl);
         if (!res.ok || !res.body) {
           setSseStatus("offline");
@@ -153,7 +156,9 @@ export function ConversationView({ runId }: ConversationViewProps) {
               const event = JSON.parse(dataStr);
               if (stopped) return;
               processEvent(event);
-            } catch { /* skip malformed */ }
+            } catch {
+              /* skip malformed */
+            }
           }
         }
         if (!stopped) setSseStatus("done");
@@ -163,7 +168,9 @@ export function ConversationView({ runId }: ConversationViewProps) {
     };
 
     connect();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
   }, [runId, processEvent]);
 
   const handleInject = async () => {
@@ -202,7 +209,11 @@ export function ConversationView({ runId }: ConversationViewProps) {
       <div className="max-h-[60vh] overflow-auto rounded-md border border-border bg-zinc-950 p-4 text-xs font-mono space-y-2">
         {turns.length === 0 && (
           <div className="text-zinc-500">
-            {sseStatus === "streaming" ? "等待事件..." : sseStatus === "offline" ? "无实时流(DB 同步中)" : "连接中..."}
+            {sseStatus === "streaming"
+              ? "等待事件..."
+              : sseStatus === "offline"
+                ? "无实时流(DB 同步中)"
+                : "连接中..."}
           </div>
         )}
         {turns.map((turn, i) => (
@@ -224,9 +235,7 @@ export function ConversationView({ runId }: ConversationViewProps) {
               </div>
             )}
             {turn.role === "assistant" && turn.content && (
-              <div className="text-zinc-200 whitespace-pre-wrap">
-                {turn.content}
-              </div>
+              <div className="text-zinc-200 whitespace-pre-wrap">{turn.content}</div>
             )}
             {turn.role === "tool" && (
               <div className="pl-4 border-l-2 border-zinc-700">
@@ -235,32 +244,39 @@ export function ConversationView({ runId }: ConversationViewProps) {
                   {turn.toolInput && <span className="text-zinc-500"> {turn.toolInput}</span>}
                 </div>
                 {turn.content && (
-                  <div className={`text-zinc-400 whitespace-pre-wrap text-[10px] mt-0.5 ${turn.isError ? "text-red-400" : ""}`}>
-                    {turn.isError ? "❌ " : ""}{turn.content}
+                  <div
+                    className={`text-zinc-400 whitespace-pre-wrap text-[10px] mt-0.5 ${turn.isError ? "text-red-400" : ""}`}
+                  >
+                    {turn.isError ? "❌ " : ""}
+                    {turn.content}
                   </div>
                 )}
               </div>
             )}
             {turn.role === "result" && (
-              <div className={`font-semibold ${turn.content.startsWith("✅") ? "text-green-400" : "text-red-400"}`}>
+              <div
+                className={`font-semibold ${turn.content.startsWith("✅") ? "text-green-400" : "text-red-400"}`}
+              >
                 {turn.content}
               </div>
             )}
           </div>
         ))}
-        {sseStatus === "streaming" && (
-          <div className="text-zinc-500 animate-pulse">▍</div>
-        )}
+        {sseStatus === "streaming" && <div className="text-zinc-500 animate-pulse">▍</div>}
       </div>
 
       {/* 状态栏 */}
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className={`inline-flex items-center gap-1 ${sseStatus === "streaming" ? "text-green-600" : ""}`}>
-          {sseStatus === "streaming" && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500" />}
+        <span
+          className={`inline-flex items-center gap-1 ${sseStatus === "streaming" ? "text-green-600" : ""}`}
+        >
+          {sseStatus === "streaming" && (
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500" />
+          )}
           {sseStatus}
         </span>
-        <span>{turns.filter(t => t.role === "assistant").length} 条回复</span>
-        <span>{turns.filter(t => t.role === "tool").length} 次工具调用</span>
+        <span>{turns.filter((t) => t.role === "assistant").length} 条回复</span>
+        <span>{turns.filter((t) => t.role === "tool").length} 次工具调用</span>
       </div>
 
       {/* 人工注入 */}
@@ -269,7 +285,12 @@ export function ConversationView({ runId }: ConversationViewProps) {
           type="text"
           value={injectInput}
           onChange={(e) => setInjectInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleInject(); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleInject();
+            }
+          }}
           placeholder="输入消息给模型(人工干预)..."
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           disabled={injecting}

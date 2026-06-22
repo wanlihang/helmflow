@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import type { StructureAnalysisResult } from "@/lib/structure-analyzer";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // 可编辑的结构数据
@@ -60,9 +60,7 @@ interface StructureReviewDialogProps {
 // 将 API 结果转为可编辑状态
 // ---------------------------------------------------------------------------
 
-function toEditableState(
-  result: StructureAnalysisResult,
-): EditableDomain[] {
+function toEditableState(result: StructureAnalysisResult): EditableDomain[] {
   return result.domains.map((d) => ({
     id: d.id,
     name: d.name,
@@ -98,9 +96,7 @@ export function StructureReviewDialog({
   runId,
 }: StructureReviewDialogProps) {
   const router = useRouter();
-  const [domains, setDomains] = useState<EditableDomain[]>(() =>
-    toEditableState(result),
-  );
+  const [domains, setDomains] = useState<EditableDomain[]>(() => toEditableState(result));
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
 
@@ -122,15 +118,11 @@ export function StructureReviewDialog({
 
   // ---- 域操作 ----
   function toggleDomain(di: number) {
-    setDomains((prev) =>
-      prev.map((d, i) => (i === di ? { ...d, expanded: !d.expanded } : d)),
-    );
+    setDomains((prev) => prev.map((d, i) => (i === di ? { ...d, expanded: !d.expanded } : d)));
   }
 
   function updateDomainName(di: number, name: string) {
-    setDomains((prev) =>
-      prev.map((d, i) => (i === di ? { ...d, name } : d)),
-    );
+    setDomains((prev) => prev.map((d, i) => (i === di ? { ...d, name } : d)));
   }
 
   // ---- 功能点操作 ----
@@ -140,9 +132,7 @@ export function StructureReviewDialog({
         i === di
           ? {
               ...d,
-              features: d.features.map((f, j) =>
-                j === fi ? { ...f, included: !f.included } : f,
-              ),
+              features: d.features.map((f, j) => (j === fi ? { ...f, included: !f.included } : f)),
             }
           : d,
       ),
@@ -155,29 +145,20 @@ export function StructureReviewDialog({
         i === di
           ? {
               ...d,
-              features: d.features.map((f, j) =>
-                j === fi ? { ...f, expanded: !f.expanded } : f,
-              ),
+              features: d.features.map((f, j) => (j === fi ? { ...f, expanded: !f.expanded } : f)),
             }
           : d,
       ),
     );
   }
 
-  function updateFeatureField(
-    di: number,
-    fi: number,
-    field: keyof EditableFeature,
-    value: string,
-  ) {
+  function updateFeatureField(di: number, fi: number, field: keyof EditableFeature, value: string) {
     setDomains((prev) =>
       prev.map((d, i) =>
         i === di
           ? {
               ...d,
-              features: d.features.map((f, j) =>
-                j === fi ? { ...f, [field]: value } : f,
-              ),
+              features: d.features.map((f, j) => (j === fi ? { ...f, [field]: value } : f)),
             }
           : d,
       ),
@@ -207,12 +188,7 @@ export function StructureReviewDialog({
     );
   }
 
-  function updateScenarioName(
-    di: number,
-    fi: number,
-    si: number,
-    name: string,
-  ) {
+  function updateScenarioName(di: number, fi: number, si: number, name: string) {
     setDomains((prev) =>
       prev.map((d, i) =>
         i === di
@@ -222,9 +198,7 @@ export function StructureReviewDialog({
                 j === fi
                   ? {
                       ...f,
-                      scenarios: f.scenarios.map((s, k) =>
-                        k === si ? { ...s, name } : s,
-                      ),
+                      scenarios: f.scenarios.map((s, k) => (k === si ? { ...s, name } : s)),
                     }
                   : f,
               ),
@@ -356,9 +330,7 @@ export function StructureReviewDialog({
 
   // ---- 右侧预览 ----
   function renderPreview() {
-    const includedDomains = domains.filter(
-      (d) => d.features.some((f) => f.included),
-    );
+    const includedDomains = domains.filter((d) => d.features.some((f) => f.included));
 
     if (includedDomains.length === 0) {
       return (
@@ -391,19 +363,18 @@ export function StructureReviewDialog({
                 {d.features
                   .filter((f) => f.included)
                   .map((f) => (
-                    <tr
-                      key={f.id}
-                      className="border-b border-border hover:bg-muted/30"
-                    >
-                      <td className="px-2 py-1 font-mono text-muted-foreground">
-                        {f.id}
-                      </td>
+                    <tr key={f.id} className="border-b border-border hover:bg-muted/30">
+                      <td className="px-2 py-1 font-mono text-muted-foreground">{f.id}</td>
                       <td className="px-2 py-1">{f.name}</td>
                       {allScenarioNames.map((sn) => {
                         const sc = f.scenarios.find((s) => s.name === sn && s.included);
                         return (
                           <td key={sn} className="px-2 py-1 text-center">
-                            {sc ? <Badge scenario="待实现" /> : <span className="text-muted-foreground">—</span>}
+                            {sc ? (
+                              <Badge scenario="待实现" />
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </td>
                         );
                       })}
@@ -424,9 +395,11 @@ export function StructureReviewDialog({
           <DialogTitle>审阅项目结构分析结果</DialogTitle>
           <DialogDescription>
             {result.scanSummary?.totalHandlers ?? 0} 个 Handler ·{" "}
-            {result.scanSummary?.totalActions ?? 0} 个 Action ·{" "}
-            {result.domains.length} 个域 · 耗时{" "}
-            {((result.scanSummary?.scanDurationMs ?? 0) + (result.scanSummary?.classifyDurationMs ?? 0)) / 1000}s
+            {result.scanSummary?.totalActions ?? 0} 个 Action · {result.domains.length} 个域 · 耗时{" "}
+            {((result.scanSummary?.scanDurationMs ?? 0) +
+              (result.scanSummary?.classifyDurationMs ?? 0)) /
+              1000}
+            s
           </DialogDescription>
         </DialogHeader>
 
@@ -444,8 +417,8 @@ export function StructureReviewDialog({
                   <span className="text-xs">{d.expanded ? "▼" : "▶"}</span>
                   <span className="text-sm font-semibold">{d.name}</span>
                   <span className="font-mono text-xs text-muted-foreground">
-                    {d.id} · {d.features.filter((f) => f.included).length}/
-                    {d.features.length} 功能点
+                    {d.id} · {d.features.filter((f) => f.included).length}/{d.features.length}{" "}
+                    功能点
                   </span>
                 </button>
 
@@ -482,15 +455,11 @@ export function StructureReviewDialog({
                           >
                             {f.expanded ? "▼" : "▶"}
                           </button>
-                          <span className="font-mono text-xs font-semibold">
-                            {f.id}
-                          </span>
+                          <span className="font-mono text-xs font-semibold">{f.id}</span>
                           <input
                             className={`${inputCls} flex-1`}
                             value={f.name}
-                            onChange={(e) =>
-                              updateFeatureField(di, fi, "name", e.target.value)
-                            }
+                            onChange={(e) => updateFeatureField(di, fi, "name", e.target.value)}
                             disabled={!f.included}
                           />
                         </div>
@@ -510,7 +479,9 @@ export function StructureReviewDialog({
                                 />
                               </div>
                               <div>
-                                <label className="text-[10px] text-muted-foreground">Actions (逗号分隔)</label>
+                                <label className="text-[10px] text-muted-foreground">
+                                  Actions (逗号分隔)
+                                </label>
                                 <input
                                   className={inputCls}
                                   value={f.actions.join(", ")}
@@ -557,7 +528,8 @@ export function StructureReviewDialog({
                             <div>
                               <div className="flex items-center justify-between">
                                 <span className="text-[10px] font-semibold text-muted-foreground">
-                                  场景{f.scenarios.length > 3 && (
+                                  场景
+                                  {f.scenarios.length > 3 && (
                                     <span className="ml-1 text-yellow-600 font-normal">
                                       ⚠ {f.scenarios.length} 个（建议 ≤3，仅保留业务维度）
                                     </span>
@@ -628,9 +600,7 @@ export function StructureReviewDialog({
 
           {/* 右侧：矩阵预览 */}
           <div className="overflow-auto rounded-md border border-border bg-muted/20 p-3">
-            <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
-              矩阵预览
-            </h3>
+            <h3 className="mb-3 text-xs font-semibold text-muted-foreground">矩阵预览</h3>
             {renderPreview()}
           </div>
         </div>
@@ -644,8 +614,7 @@ export function StructureReviewDialog({
 
         <DialogFooter className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            将导入 {stats.domainCount} 域 / {stats.featureCount} 功能点 /{" "}
-            {stats.scenarioCount} 场景
+            将导入 {stats.domainCount} 域 / {stats.featureCount} 功能点 / {stats.scenarioCount} 场景
           </span>
           <div className="flex gap-2">
             <DialogClose asChild>

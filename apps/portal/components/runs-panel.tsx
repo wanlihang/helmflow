@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 
 interface RunItem {
   id: string;
@@ -79,7 +79,9 @@ export function RunsPanel({ initialRuns }: { initialRuns: RunItem[] }) {
         )}
       </div>
       <p className="text-sm text-muted-foreground">
-        所有 AI 调用(Clarifier/Coder/分析/契约同步…)的运行态。「最后活动」判断是否真在执行:新鲜=执行中,5min 无活动=疑似卡住(自动清理)。
+        所有 AI
+        调用(Clarifier/Coder/分析/契约同步…)的运行态。「最后活动」判断是否真在执行:新鲜=执行中,5min
+        无活动=疑似卡住(自动清理)。
       </p>
 
       {runs.length === 0 ? (
@@ -106,19 +108,32 @@ export function RunsPanel({ initialRuns }: { initialRuns: RunItem[] }) {
                 return (
                   <tr key={r.id} className="border-b border-border hover:bg-muted/30">
                     <td className="px-3 py-2">
-                      <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ${STATE_STYLE[r.state] ?? "bg-gray-100 text-gray-600"}`}>
-                        {active && <span className={`inline-block h-1.5 w-1.5 rounded-full ${stale ? "bg-yellow-500" : "animate-pulse bg-blue-500"}`} />}
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ${STATE_STYLE[r.state] ?? "bg-gray-100 text-gray-600"}`}
+                      >
+                        {active && (
+                          <span
+                            className={`inline-block h-1.5 w-1.5 rounded-full ${stale ? "bg-yellow-500" : "animate-pulse bg-blue-500"}`}
+                          />
+                        )}
                         {stale ? "疑似卡住" : r.state}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-xs">{KIND_LABEL[r.kind] ?? r.kind}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.cellId}</td>
-                    <td className={`px-3 py-2 text-xs ${stale ? "text-yellow-600 font-semibold" : active ? "text-blue-600" : "text-muted-foreground"}`}>
+                    <td
+                      className={`px-3 py-2 text-xs ${stale ? "text-yellow-600 font-semibold" : active ? "text-blue-600" : "text-muted-foreground"}`}
+                    >
                       {timeAgo(r.lastActivity)}
                     </td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">{timeAgo(r.startedAt)}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {timeAgo(r.startedAt)}
+                    </td>
                     <td className="px-3 py-2">
-                      <Link href={`/runs/${r.id}`} className="font-mono text-xs text-blue-600 hover:underline">
+                      <Link
+                        href={`/runs/${r.id}`}
+                        className="font-mono text-xs text-blue-600 hover:underline"
+                      >
                         {r.id.slice(0, 18)}…
                       </Link>
                     </td>

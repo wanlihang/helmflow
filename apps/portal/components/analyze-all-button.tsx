@@ -1,16 +1,16 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  useAnalyzeLog,
-  formatToolEvent,
   type AnalysisResult,
   type AnalyzeGetResponse,
   type AnalyzeSseEvent,
+  formatToolEvent,
+  useAnalyzeLog,
 } from "@/lib/analyze-utils";
-import { parseSseChunk, extractSseData } from "@/lib/sse-parse";
+import { extractSseData, parseSseChunk } from "@/lib/sse-parse";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 export function AnalyzeAllButton() {
   const router = useRouter();
@@ -58,7 +58,9 @@ export function AnalyzeAllButton() {
         // ignore
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
   }, []);
 
   function replayDbEvent(ev: { payload: Record<string, unknown> }) {
@@ -66,7 +68,9 @@ export function AnalyzeAllButton() {
     switch (p.type) {
       case "analyze-start":
         if (p.phase === "scan") {
-          appendLog(`📋 代码扫描启动 (scope=${p.scope ?? "?"})，共 ${p.totalCells ?? "?"} 个格子待分类`);
+          appendLog(
+            `📋 代码扫描启动 (scope=${p.scope ?? "?"})，共 ${p.totalCells ?? "?"} 个格子待分类`,
+          );
         } else {
           appendLog(`📋 分析任务启动，共 ${p.totalCells ?? "?"} 个格子 (scope=${p.scope ?? "?"})`);
         }
@@ -74,11 +78,15 @@ export function AnalyzeAllButton() {
       case "scan-done": {
         const inv = p.inventory as unknown[];
         const fb = p.fallback ? "（降级模式）" : "";
-        appendLog(`✅ 代码扫描完成${fb}，发现 ${inv?.length ?? 0} 个类 (${((p.scanDurationMs ?? 0) / 1000).toFixed(1)}s)`);
+        appendLog(
+          `✅ 代码扫描完成${fb}，发现 ${inv?.length ?? 0} 个类 (${((p.scanDurationMs ?? 0) / 1000).toFixed(1)}s)`,
+        );
         break;
       }
       case "classify-start":
-        appendLog(`📋 基于扫描结果分类 ${p.cellCount ?? "?"} 个格子状态...${p.fallback ? "（降级模式）" : ""}`);
+        appendLog(
+          `📋 基于扫描结果分类 ${p.cellCount ?? "?"} 个格子状态...${p.fallback ? "（降级模式）" : ""}`,
+        );
         break;
       case "tool_use":
         appendLog(formatToolEvent(p.name ?? "?", p.input));
@@ -100,7 +108,9 @@ export function AnalyzeAllButton() {
           appendLog("✅ 分析完成: 无状态变更");
         }
         if (p.scanDurationMs != null && p.classifyDurationMs != null) {
-          appendLog(`⏱ 扫描 ${(p.scanDurationMs / 1000).toFixed(1)}s + 分类 ${(p.classifyDurationMs / 1000).toFixed(1)}s · 清单 ${p.inventorySize ?? "?"} 个类`);
+          appendLog(
+            `⏱ 扫描 ${(p.scanDurationMs / 1000).toFixed(1)}s + 分类 ${(p.classifyDurationMs / 1000).toFixed(1)}s · 清单 ${p.inventorySize ?? "?"} 个类`,
+          );
         } else if (p.durationMs != null) {
           appendLog(`⏱ 耗时 ${(p.durationMs / 1000).toFixed(1)}s · ${p.turns ?? "?"} turns`);
         }
@@ -153,19 +163,27 @@ export function AnalyzeAllButton() {
             switch (event.type) {
               case "analyze-start":
                 if (event.phase === "scan") {
-                  appendLog(`📋 代码扫描启动 (scope=${event.scope ?? "?"})，共 ${event.totalCells ?? "?"} 个格子待分类`);
+                  appendLog(
+                    `📋 代码扫描启动 (scope=${event.scope ?? "?"})，共 ${event.totalCells ?? "?"} 个格子待分类`,
+                  );
                 } else {
-                  appendLog(`📋 分析任务启动，共 ${event.totalCells ?? "?"} 个格子 (scope=${event.scope ?? "?"})`);
+                  appendLog(
+                    `📋 分析任务启动，共 ${event.totalCells ?? "?"} 个格子 (scope=${event.scope ?? "?"})`,
+                  );
                 }
                 break;
               case "scan-done": {
                 const inv = event.inventory as unknown[] | undefined;
                 const fb = event.fallback ? "（降级模式）" : "";
-                appendLog(`✅ 代码扫描完成${fb}，发现 ${inv?.length ?? 0} 个类 (${((event.scanDurationMs ?? 0) / 1000).toFixed(1)}s)`);
+                appendLog(
+                  `✅ 代码扫描完成${fb}，发现 ${inv?.length ?? 0} 个类 (${((event.scanDurationMs ?? 0) / 1000).toFixed(1)}s)`,
+                );
                 break;
               }
               case "classify-start":
-                appendLog(`📋 基于扫描结果分类 ${event.cellCount ?? "?"} 个格子状态...${event.fallback ? "（降级模式）" : ""}`);
+                appendLog(
+                  `📋 基于扫描结果分类 ${event.cellCount ?? "?"} 个格子状态...${event.fallback ? "（降级模式）" : ""}`,
+                );
                 break;
               case "tool_use":
                 appendLog(formatToolEvent(event.name ?? "?", event.input));
@@ -187,9 +205,13 @@ export function AnalyzeAllButton() {
                   appendLog("✅ 分析完成: 无状态变更");
                 }
                 if (event.scanDurationMs != null && event.classifyDurationMs != null) {
-                  appendLog(`⏱ 扫描 ${(event.scanDurationMs / 1000).toFixed(1)}s + 分类 ${(event.classifyDurationMs / 1000).toFixed(1)}s · 清单 ${event.inventorySize ?? "?"} 个类`);
+                  appendLog(
+                    `⏱ 扫描 ${(event.scanDurationMs / 1000).toFixed(1)}s + 分类 ${(event.classifyDurationMs / 1000).toFixed(1)}s · 清单 ${event.inventorySize ?? "?"} 个类`,
+                  );
                 } else if (event.durationMs != null) {
-                  appendLog(`⏱ 耗时 ${(event.durationMs / 1000).toFixed(1)}s · ${event.turns ?? "?"} turns`);
+                  appendLog(
+                    `⏱ 耗时 ${(event.durationMs / 1000).toFixed(1)}s · ${event.turns ?? "?"} turns`,
+                  );
                 }
                 break;
               case "error":
@@ -247,7 +269,9 @@ export function AnalyzeAllButton() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        appendLog(`❌ 应用失败: ${cellId} — ${(data as { error?: string }).error ?? `HTTP ${res.status}`}`);
+        appendLog(
+          `❌ 应用失败: ${cellId} — ${(data as { error?: string }).error ?? `HTTP ${res.status}`}`,
+        );
         return;
       }
       const remaining = results?.filter((r) => r.cellId !== cellId) ?? [];
@@ -267,12 +291,7 @@ export function AnalyzeAllButton() {
 
   return (
     <div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleAnalyze}
-        disabled={analyzing}
-      >
+      <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
         {analyzing ? "分析中..." : "重新分析状态"}
       </Button>
 
@@ -298,11 +317,15 @@ export function AnalyzeAllButton() {
             <h3 className="mb-3 text-lg font-semibold">分析结果 — {results.length} 项变更</h3>
             <div className="space-y-2">
               {results.map((r) => (
-                <div key={r.cellId} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-xs">
+                <div
+                  key={r.cellId}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-xs"
+                >
                   <div className="flex-1">
                     <div className="font-mono font-semibold">{r.cellId}</div>
                     <div className="text-muted-foreground">
-                      {r.oldStatus} → <span className="font-semibold text-foreground">{r.newStatus}</span>
+                      {r.oldStatus} →{" "}
+                      <span className="font-semibold text-foreground">{r.newStatus}</span>
                     </div>
                     <div className="text-muted-foreground">{r.reason}</div>
                   </div>
@@ -317,7 +340,9 @@ export function AnalyzeAllButton() {
                     <button
                       type="button"
                       className="rounded bg-gray-100 px-2 py-1 text-gray-600 hover:bg-gray-200"
-                      onClick={() => setResults((prev) => prev?.filter((x) => x.cellId !== r.cellId) ?? null)}
+                      onClick={() =>
+                        setResults((prev) => prev?.filter((x) => x.cellId !== r.cellId) ?? null)
+                      }
                     >
                       跳过
                     </button>

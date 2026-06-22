@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { getDb } from "@/lib/db";
 import {
   getContractById,
   getLatestContract,
-  updateContractStatus,
   updateCellAgentStatus,
+  updateContractStatus,
 } from "@helmflow/storage";
-import { getDb } from "@/lib/db";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,10 +23,7 @@ export async function POST(_req: Request, ctx: RouteContext): Promise<Response> 
   const db = getDb();
   const contract = getContractById(db, id);
   if (!contract) {
-    return NextResponse.json(
-      { error: `Contract not found: ${id}` },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: `Contract not found: ${id}` }, { status: 404 });
   }
   if (contract.status !== "draft") {
     return NextResponse.json(

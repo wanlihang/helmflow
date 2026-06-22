@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
 import { RegisterProjectDialog } from "@/components/register-project-dialog";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 interface Project {
   id: string;
@@ -14,10 +14,7 @@ interface ProjectSwitcherProps {
   currentProjectId: string;
 }
 
-export function ProjectSwitcher({
-  projects,
-  currentProjectId,
-}: ProjectSwitcherProps) {
+export function ProjectSwitcher({ projects, currentProjectId }: ProjectSwitcherProps) {
   const router = useRouter();
   const [selected, setSelected] = useState(currentProjectId);
 

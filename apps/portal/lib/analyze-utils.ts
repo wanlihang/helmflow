@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 
 // ─── Log utilities shared by AnalyzeCellButton and AnalyzeAllButton ────
 
-const EMOJI_LINE_RE = /^[📋📂⚡🔧⚠️✅❌⏱▶]/;
+const EMOJI_LINE_RE = /^[📋📂⚡🔧⚠️✅❌⏱▶]/u;
 
 export interface AnalysisResult {
   cellId: string;
@@ -60,15 +60,17 @@ export interface AnalyzeSseEvent {
 
 export function formatToolEvent(name: string, input: Record<string, unknown> | undefined): string {
   if (name === "Read") {
-    const path = typeof input?.file_path === "string"
-      ? input.file_path.replace(/^.*\/src\//, "src/")
-      : String(input?.file_path ?? "");
+    const path =
+      typeof input?.file_path === "string"
+        ? input.file_path.replace(/^.*\/src\//, "src/")
+        : String(input?.file_path ?? "");
     return `📂 读取: ${path}`;
   }
   if (name === "Bash") {
-    const cmd = typeof input?.command === "string"
-      ? input.command.split("\n")[0] ?? ""
-      : String(input?.command ?? "");
+    const cmd =
+      typeof input?.command === "string"
+        ? (input.command.split("\n")[0] ?? "")
+        : String(input?.command ?? "");
     return `⚡ 执行: ${cmd.slice(0, 120)}`;
   }
   return `🔧 ${name}(${JSON.stringify(input ?? {}).slice(0, 80)})`;

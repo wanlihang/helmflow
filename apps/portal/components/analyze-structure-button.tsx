@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { StructureReviewDialog } from "@/components/structure-review-dialog";
-import { parseSseChunk, extractSseData } from "@/lib/sse-parse";
-import {
-  useAnalyzeLog,
-  formatToolEvent,
-} from "@/lib/analyze-utils";
+import { Button } from "@/components/ui/button";
+import { formatToolEvent, useAnalyzeLog } from "@/lib/analyze-utils";
+import { extractSseData, parseSseChunk } from "@/lib/sse-parse";
 import type { StructureAnalysisResult } from "@/lib/structure-analyzer";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 interface AnalyzeStructureButtonProps {
   projectId: string;
@@ -21,27 +18,21 @@ interface StructureGetResponse {
   result: StructureAnalysisResult | null;
 }
 
-export function AnalyzeStructureButton({
-  projectId,
-}: AnalyzeStructureButtonProps) {
+export function AnalyzeStructureButton({ projectId }: AnalyzeStructureButtonProps) {
   const router = useRouter();
   const [analyzing, setAnalyzing] = useState(false);
-  const [structureResult, setStructureResult] =
-    useState<StructureAnalysisResult | null>(null);
+  const [structureResult, setStructureResult] = useState<StructureAnalysisResult | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
-  const { logLines, logRef, appendLog, appendToken, clearLog } =
-    useAnalyzeLog();
+  const { logLines, logRef, appendLog, appendToken, clearLog } = useAnalyzeLog();
 
   // ---- On mount: restore latest analyze-structure run from DB ----
   useEffect(() => {
     let stopped = false;
     (async () => {
       try {
-        const res = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/analyze-structure`,
-        );
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/analyze-structure`);
         if (!res.ok) return;
         const data = (await res.json()) as StructureGetResponse;
         if (stopped) return;
@@ -73,7 +64,9 @@ export function AnalyzeStructureButton({
         // 首次加载失败不致命
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
   }, [projectId]);
 
   function replayDbEvent(p: Record<string, unknown>) {
@@ -83,20 +76,17 @@ export function AnalyzeStructureButton({
         break;
       case "scan-done":
         appendLog(
-          `✅ 代码扫描完成，发现 ${p.handlerCount ?? 0} 个 Handler，${p.inventorySize ?? 0} 个类 (${((p.scanDurationMs as number ?? 0) / 1000).toFixed(1)}s)`,
+          `✅ 代码扫描完成，发现 ${p.handlerCount ?? 0} 个 Handler，${p.inventorySize ?? 0} 个类 (${(((p.scanDurationMs as number) ?? 0) / 1000).toFixed(1)}s)`,
         );
         break;
       case "structure-infer-start":
-        appendLog(
-          `📋 开始推断结构：${p.handlerCount ?? 0} 个 Handler → 域 / 功能点 / 场景...`,
-        );
+        appendLog(`📋 开始推断结构：${p.handlerCount ?? 0} 个 Handler → 域 / 功能点 / 场景...`);
         break;
       case "tool_use":
         appendLog(formatToolEvent(p.name as string, p.input as Record<string, unknown>));
         break;
       case "tool_result":
-        if (p.isError)
-          appendLog(`⚠️ 工具失败: ${(p.preview as string ?? "").slice(0, 100)}`);
+        if (p.isError) appendLog(`⚠️ 工具失败: ${((p.preview as string) ?? "").slice(0, 100)}`);
         break;
       case "token":
         if (p.text) appendToken(p.text as string);
@@ -130,13 +120,10 @@ export function AnalyzeStructureButton({
     appendLog("▶ 开始识别项目结构...");
 
     try {
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/analyze-structure`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/analyze-structure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
 
       if (!res.ok || !res.body) {
         const data = await res.text();
@@ -184,22 +171,18 @@ export function AnalyzeStructureButton({
         break;
       case "scan-done":
         appendLog(
-          `✅ 代码扫描完成，发现 ${event.handlerCount ?? 0} 个 Handler，${event.inventorySize ?? 0} 个类 (${((event.scanDurationMs as number ?? 0) / 1000).toFixed(1)}s)`,
+          `✅ 代码扫描完成，发现 ${event.handlerCount ?? 0} 个 Handler，${event.inventorySize ?? 0} 个类 (${(((event.scanDurationMs as number) ?? 0) / 1000).toFixed(1)}s)`,
         );
         break;
       case "structure-infer-start":
-        appendLog(
-          `📋 开始推断结构：${event.handlerCount ?? 0} 个 Handler → 域 / 功能点 / 场景...`,
-        );
+        appendLog(`📋 开始推断结构：${event.handlerCount ?? 0} 个 Handler → 域 / 功能点 / 场景...`);
         break;
       case "tool_use":
         appendLog(formatToolEvent(event.name as string, event.input as Record<string, unknown>));
         break;
       case "tool_result":
         if (event.isError)
-          appendLog(
-            `⚠️ 工具失败: ${(event.preview as string ?? "").slice(0, 100)}`,
-          );
+          appendLog(`⚠️ 工具失败: ${((event.preview as string) ?? "").slice(0, 100)}`);
         break;
       case "token":
         if (event.text) appendToken(event.text as string);
@@ -230,12 +213,7 @@ export function AnalyzeStructureButton({
 
   return (
     <div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleAnalyze}
-        disabled={analyzing}
-      >
+      <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
         {analyzing ? "识别中..." : "🔍 识别结构"}
       </Button>
 

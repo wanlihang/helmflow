@@ -1,5 +1,10 @@
-import { features, featureScenarios, cellId as makeCellId, listFeatureScenarios } from "@helmflow/storage";
 import { getProject } from "@helmflow/manifest-loader";
+import {
+  featureScenarios,
+  features,
+  listFeatureScenarios,
+  cellId as makeCellId,
+} from "@helmflow/storage";
 import { getDb } from "./db";
 
 /**
@@ -8,11 +13,11 @@ import { getDb } from "./db";
  * 新需求澄清后才产出;存量代码扫码识别;未分析时各字段为空。
  */
 export interface Implementation {
-  decider: string;     // 决策层(走哪个分支)
-  acceptor: string;    // 接收/校验层
-  handler: string;     // 业务编排层
-  actions: string[];   // 执行步骤
-  context: string;     // 所属域
+  decider: string; // 决策层(走哪个分支)
+  acceptor: string; // 接收/校验层
+  handler: string; // 业务编排层
+  actions: string[]; // 执行步骤
+  context: string; // 所属域
 }
 
 export type FeatureStatus =
@@ -121,7 +126,9 @@ function loadProjectMeta(projectId?: string): {
         sandboxPath = project.manifest.sandboxPath;
         description = project.manifest.description;
       }
-    } catch { /* fallback */ }
+    } catch {
+      /* fallback */
+    }
   }
   return {
     description,
@@ -135,7 +142,6 @@ function loadProjectMeta(projectId?: string): {
  * 从 DB 构建 FeatureMatrix(yaml 退役:纯 DB 读,不再 seed)。
  */
 export function loadMatrix(projectId?: string): FeatureMatrix {
-
   const db = getDb();
 
   // 读出所有 feature 行(排除 archived)
@@ -205,7 +211,11 @@ export function getFeature(id: string, projectId?: string): Feature | undefined 
   return undefined;
 }
 
-export function getCell(featureId: string, scenarioName: string, projectId?: string): Cell | undefined {
+export function getCell(
+  featureId: string,
+  scenarioName: string,
+  projectId?: string,
+): Cell | undefined {
   const feature = getFeature(featureId, projectId);
   if (!feature) return undefined;
   const scenario = feature.scenarios.find((s) => s.name === scenarioName);
@@ -225,8 +235,7 @@ export function getTotalFeatureCount(projectId?: string): number {
     .select()
     .from(features)
     .all()
-    .filter((r) => r.projectId === effectiveProjectId && r.status !== "archived")
-    .length;
+    .filter((r) => r.projectId === effectiveProjectId && r.status !== "archived").length;
 }
 
 export function getAllScenarioNames(projectId?: string): string[] {

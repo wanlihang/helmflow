@@ -1,16 +1,14 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 
 interface ApproveContractButtonProps {
   contractId: string;
 }
 
-export function ApproveContractButton({
-  contractId,
-}: ApproveContractButtonProps) {
+export function ApproveContractButton({ contractId }: ApproveContractButtonProps) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

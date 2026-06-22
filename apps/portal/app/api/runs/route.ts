@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
-import {
-  listRunningRuns,
-  listRecentRuns,
-  getRunsLastActivity,
-  cleanupStaleRuns,
-} from "@helmflow/storage";
 import { getDb } from "@/lib/db";
+import {
+  cleanupStaleRuns,
+  getRunsLastActivity,
+  listRecentRuns,
+  listRunningRuns,
+} from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +34,10 @@ export async function GET(req: Request): Promise<Response> {
     const state = url.searchParams.get("state");
 
     const rows = state === "running" ? listRunningRuns(db, 50) : listRecentRuns(db, 30);
-    const activityMap = getRunsLastActivity(db, rows.map((r) => r.id));
+    const activityMap = getRunsLastActivity(
+      db,
+      rows.map((r) => r.id),
+    );
 
     const out: RunOut[] = rows.map((r) => ({
       id: r.id,
@@ -46,7 +49,10 @@ export async function GET(req: Request): Promise<Response> {
       lastActivity: activityMap[r.id] ?? r.startedAt,
     }));
 
-    return NextResponse.json({ runs: out, runningCount: state === "running" ? out.length : listRunningRuns(db, 1000).length });
+    return NextResponse.json({
+      runs: out,
+      runningCount: state === "running" ? out.length : listRunningRuns(db, 1000).length,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });

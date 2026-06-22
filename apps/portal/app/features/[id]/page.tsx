@@ -1,8 +1,12 @@
-import { notFound } from "next/navigation";
-import { getFeature, getDomainOfFeature, type Feature, type Domain } from "@/lib/matrix";
-import { listContractsForFeature, listRunsForFeature, cellId as makeCellId } from "@helmflow/storage";
-import { getDb } from "@/lib/db";
 import { FeaturePageClient } from "@/components/feature-detail-client";
+import { getDb } from "@/lib/db";
+import { type Domain, type Feature, getDomainOfFeature, getFeature } from "@/lib/matrix";
+import {
+  listContractsForFeature,
+  listRunsForFeature,
+  cellId as makeCellId,
+} from "@helmflow/storage";
+import { notFound } from "next/navigation";
 
 interface FeaturePageProps {
   params: Promise<{ id: string }>;

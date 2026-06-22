@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import type { ScenarioStatus } from "@/lib/matrix";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface AddScenarioDialogProps {
   open: boolean;
@@ -21,11 +21,7 @@ interface AddScenarioDialogProps {
 
 const STATUS_OPTIONS: ScenarioStatus[] = ["待实现", "需改造", "已支持", "废弃"];
 
-export function AddScenarioDialog({
-  open,
-  onOpenChange,
-  featureId,
-}: AddScenarioDialogProps) {
+export function AddScenarioDialog({ open, onOpenChange, featureId }: AddScenarioDialogProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

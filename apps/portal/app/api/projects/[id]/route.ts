@@ -1,15 +1,15 @@
-import { NextResponse } from "next/server";
 import { existsSync, statSync, writeFileSync } from "node:fs";
-import { resolve, isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { getDb } from "@/lib/db";
+import { type Manifest, loadManifest } from "@helmflow/manifest-loader";
 import {
-  getProjectById,
-  updateProject as updateProjectDb,
-  softDeleteProject,
   countFeaturesByProject,
   countFeaturesByStatus,
+  getProjectById,
+  softDeleteProject,
+  updateProject as updateProjectDb,
 } from "@helmflow/storage";
-import { loadManifest, type Manifest } from "@helmflow/manifest-loader";
+import { NextResponse } from "next/server";
 import { stringify as stringifyYaml } from "yaml";
 
 export const runtime = "nodejs";
@@ -73,8 +73,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const adapterType =
-    typeof body.adapterType === "string" ? body.adapterType : undefined;
+  const adapterType = typeof body.adapterType === "string" ? body.adapterType : undefined;
   if (adapterType) {
     const VALID_ADAPTERS = ["java-ddd", "node-express"];
     if (!VALID_ADAPTERS.includes(adapterType)) {
@@ -85,8 +84,7 @@ export async function PATCH(
     }
   }
 
-  const sandboxPath =
-    typeof body.sandboxPath === "string" ? body.sandboxPath.trim() : undefined;
+  const sandboxPath = typeof body.sandboxPath === "string" ? body.sandboxPath.trim() : undefined;
   if (sandboxPath) {
     const abs = isAbsolute(sandboxPath)
       ? resolve(sandboxPath)
@@ -101,15 +99,10 @@ export async function PATCH(
 
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   const featureMatrixPath =
-    typeof body.featureMatrixPath === "string"
-      ? body.featureMatrixPath.trim()
-      : undefined;
-  const standardsRoot =
-    typeof body.standardsRoot === "string" ? body.standardsRoot : undefined;
-  const repoUrl =
-    typeof body.repoUrl === "string" ? body.repoUrl : undefined;
-  const description =
-    typeof body.description === "string" ? body.description : undefined;
+    typeof body.featureMatrixPath === "string" ? body.featureMatrixPath.trim() : undefined;
+  const standardsRoot = typeof body.standardsRoot === "string" ? body.standardsRoot : undefined;
+  const repoUrl = typeof body.repoUrl === "string" ? body.repoUrl : undefined;
+  const description = typeof body.description === "string" ? body.description : undefined;
 
   const updated = updateProjectDb(db, id, {
     name,
@@ -156,10 +149,7 @@ export async function DELETE(
   const { id } = await ctx.params;
 
   if (id === "mycmdeliverhub") {
-    return NextResponse.json(
-      { error: "默认项目不可注销" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "默认项目不可注销" }, { status: 400 });
   }
 
   const db = getDb();

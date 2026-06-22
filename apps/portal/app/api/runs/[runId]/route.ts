@@ -1,12 +1,7 @@
-import { NextResponse } from "next/server";
-import {
-  getRunById,
-  listRunsForCell,
-  listAttemptsForRuns,
-  listRunEvents,
-} from "@helmflow/storage";
-import { getActiveRuns } from "@helmflow/sandbox-worktree";
 import { getDb } from "@/lib/db";
+import { getActiveRuns } from "@helmflow/sandbox-worktree";
+import { getRunById, listAttemptsForRuns, listRunEvents, listRunsForCell } from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +10,7 @@ interface RouteParams {
   params: Promise<{ runId: string }>;
 }
 
-export async function GET(
-  req: Request,
-  context: RouteParams,
-): Promise<Response> {
+export async function GET(req: Request, context: RouteParams): Promise<Response> {
   const { runId } = await context.params;
   const db = getDb();
 
@@ -41,11 +33,14 @@ export async function GET(
     (ar) => ar.superRunId === runId || cellId.startsWith(ar.featureId + "__"),
   );
 
-  const nodeStates: Record<string, {
-    status: "pending" | "running" | "passed" | "failed";
-    iteration: number;
-    runId?: string;
-  }> = {
+  const nodeStates: Record<
+    string,
+    {
+      status: "pending" | "running" | "passed" | "failed";
+      iteration: number;
+      runId?: string;
+    }
+  > = {
     coder: { status: "pending", iteration: 0 },
     testgen: { status: "pending", iteration: 0 },
     qa: { status: "pending", iteration: 0 },
@@ -58,9 +53,8 @@ export async function GET(
     const current = nodeStates[kind]!;
 
     const nodeAttemptList = attempts.filter((a) => a.runId === cr.id);
-    const maxIter = nodeAttemptList.length > 0
-      ? Math.max(...nodeAttemptList.map((a) => a.iteration))
-      : 1;
+    const maxIter =
+      nodeAttemptList.length > 0 ? Math.max(...nodeAttemptList.map((a) => a.iteration)) : 1;
 
     if (cr.state === "running") {
       current.status = "running";
@@ -87,7 +81,7 @@ export async function GET(
   // Load persisted events from DB
   const url = new URL(req.url);
   const afterIdParam = url.searchParams.get("afterId");
-  const afterId = afterIdParam !== null ? parseInt(afterIdParam, 10) : undefined;
+  const afterId = afterIdParam !== null ? Number.parseInt(afterIdParam, 10) : undefined;
   const events = listRunEvents(db, runId, afterId);
 
   return NextResponse.json({

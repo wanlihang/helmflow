@@ -1,25 +1,25 @@
-import { NextResponse } from "next/server";
-import { runNode, runClassify } from "@helmflow/agent-runner";
 import { getDb } from "@/lib/db";
+import { resolveSandboxPathForProject, sseEncode, sseResponse } from "@/lib/server-utils";
+import {
+  type ScannedClass,
+  type ScannedHandler,
+  type StructureAnalysisResult,
+  buildInferPrompt,
+  buildScanPrompt,
+  parseHandlerOutput,
+  parseInventoryOutput,
+  parseStructureResult,
+} from "@/lib/structure-analyzer";
+import { runClassify, runNode } from "@helmflow/agent-runner";
 import {
   createRun,
   createRunEvent,
   ensureVirtualCell,
-  updateRun,
-  listRunsByKind,
   listRunEvents,
+  listRunsByKind,
+  updateRun,
 } from "@helmflow/storage";
-import { sseEncode, sseResponse, resolveSandboxPathForProject } from "@/lib/server-utils";
-import {
-  buildScanPrompt,
-  buildInferPrompt,
-  parseInventoryOutput,
-  parseHandlerOutput,
-  parseStructureResult,
-  type ScannedClass,
-  type ScannedHandler,
-  type StructureAnalysisResult,
-} from "@/lib/structure-analyzer";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function GET(
   const runs = listRunsByKind(db, "analyze-structure", 20);
 
   // 找到属于当前项目的 run（通过 structure-start 事件的 projectId 匹配）
-  let matchedRun: typeof runs[number] | undefined;
+  let matchedRun: (typeof runs)[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
 
   for (const r of runs) {
@@ -49,7 +49,9 @@ export async function GET(
       try {
         const p = JSON.parse(ev.payload);
         return p.type === "structure-start" && p.projectId === projectId;
-      } catch { return false; }
+      } catch {
+        return false;
+      }
     });
     if (startEvent) {
       matchedRun = r;
@@ -71,7 +73,9 @@ export async function GET(
         result = p.result as StructureAnalysisResult;
         break;
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
 
   return NextResponse.json({
@@ -125,12 +129,7 @@ export async function POST(
 
         const sse = (payload: unknown) => {
           try {
-            createRunEvent(
-              db,
-              run.id,
-              (payload as { type: string }).type,
-              payload,
-            );
+            createRunEvent(db, run.id, (payload as { type: string }).type, payload);
           } catch {
             // DB 写入失败不应阻塞流
           }
@@ -152,7 +151,11 @@ export async function POST(
           }
         } finally {
           clearInterval(heartbeatTimer);
-          try { controller.close(); } catch { /* already closed */ }
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
         }
       },
       cancel() {
@@ -268,9 +271,7 @@ async function runStructureAnalysis(
     // 补充 summary
     structureResult.scanSummary = {
       totalHandlers: handlers.length,
-      totalActions: inventory.filter(
-        (c) => c.type === "action",
-      ).length,
+      totalActions: inventory.filter((c) => c.type === "action").length,
       totalDomains: structureResult.domains.length,
       scanDurationMs: scanResult.durationMs,
       classifyDurationMs: classifyResult.durationMs,

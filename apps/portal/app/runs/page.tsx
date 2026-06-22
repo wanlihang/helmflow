@@ -1,11 +1,7 @@
-import {
-  listRecentRuns,
-  getRunsLastActivity,
-  cleanupStaleRuns,
-} from "@helmflow/storage";
-import { RunsPanel } from "@/components/runs-panel";
 import { QueuePanel } from "@/components/queue-panel";
+import { RunsPanel } from "@/components/runs-panel";
 import { getDb } from "@/lib/db";
+import { cleanupStaleRuns, getRunsLastActivity, listRecentRuns } from "@helmflow/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +21,10 @@ export default async function RunsPage() {
   cleanupStaleRuns(db, 5 * 60 * 1000);
 
   const rows = listRecentRuns(db, 30);
-  const activityMap = getRunsLastActivity(db, rows.map((r) => r.id));
+  const activityMap = getRunsLastActivity(
+    db,
+    rows.map((r) => r.id),
+  );
   const initial: RunItem[] = rows.map((r) => ({
     id: r.id,
     cellId: r.cellId,

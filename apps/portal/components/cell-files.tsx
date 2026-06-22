@@ -37,9 +37,7 @@ function getCommitFiles(sha: string, sandboxPath?: string): string[] {
 
 export function CellFiles({ gitSha, sandboxPath }: CellFilesProps) {
   if (!gitSha) {
-    return (
-      <div className="text-xs text-muted-foreground">无关联 commit</div>
-    );
+    return <div className="text-xs text-muted-foreground">无关联 commit</div>;
   }
 
   const files = getCommitFiles(gitSha, sandboxPath);

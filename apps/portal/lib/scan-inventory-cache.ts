@@ -6,9 +6,9 @@
  * InventoryItem 类型统一从 @helmflow/adapter-java-ddd 导入(scanner 是权威定义)。
  */
 
-import type { DB } from "@helmflow/storage";
-import { listRunsByKind, listRunEvents } from "@helmflow/storage";
 import type { InventoryItem } from "@helmflow/adapter-java-ddd";
+import type { DB } from "@helmflow/storage";
+import { listRunEvents, listRunsByKind } from "@helmflow/storage";
 
 export type { InventoryItem };
 

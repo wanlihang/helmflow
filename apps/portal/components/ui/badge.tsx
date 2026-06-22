@@ -1,5 +1,5 @@
-import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
+import type { HTMLAttributes } from "react";
 
 type BadgeVariant = "default" | "secondary" | "outline";
 type StatusVariant =
@@ -58,7 +58,14 @@ const scenarioClasses: Record<ScenarioVariant, string> = {
   废弃: "bg-red-100 text-red-800 border border-red-200",
 };
 
-export function Badge({ variant = "default", status, scenario, className, children, ...props }: BadgeProps) {
+export function Badge({
+  variant = "default",
+  status,
+  scenario,
+  className,
+  children,
+  ...props
+}: BadgeProps) {
   let colorClass: string;
   let content: React.ReactNode;
 

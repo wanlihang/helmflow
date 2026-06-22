@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import {
   createFeatureManual,
   createScenarioManual,
-  upsertFeatureScenario,
-  updateRun,
-  listRunsByKind,
   getRunById,
+  listRunsByKind,
+  updateRun,
+  upsertFeatureScenario,
 } from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,10 @@ const SCENARIO_NAME_BLACKLIST_PATTERNS: Array<{ pattern: RegExp; reason: string 
   { pattern: /审批(通过|驳回|撤消|撤销)/, reason: "审批结果是流程内状态流转，不是业务场景" },
   { pattern: /校验(通过|失败)$/, reason: "校验结果是流程内条件判断，不是业务场景" },
   { pattern: /逆向校验/, reason: "校验结果是流程内条件判断，不是业务场景" },
-  { pattern: /(正常|异常)(执行|处理|流程|重抛)/, reason: "异常处理是所有场景共有的实现路径，不是业务场景" },
+  {
+    pattern: /(正常|异常)(执行|处理|流程|重抛)/,
+    reason: "异常处理是所有场景共有的实现路径，不是业务场景",
+  },
   { pattern: /业务异常|系统异常/, reason: "异常处理是所有场景共有的实现路径，不是业务场景" },
   { pattern: /节点(通过|驳回|撤消|撤销)/, reason: "节点状态是流程内状态流转，不是业务场景" },
   { pattern: /(协议|签约|价格|产品).*(回调|通知)/, reason: "回调是触发机制，不是业务场景维度" },
@@ -98,10 +101,7 @@ export async function POST(req: Request): Promise<Response> {
   const { projectId, features, runId } = body;
 
   if (!projectId || !Array.isArray(features) || features.length === 0) {
-    return NextResponse.json(
-      { error: "projectId 和 features 不能为空" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "projectId 和 features 不能为空" }, { status: 400 });
   }
 
   const db = getDb();
@@ -174,7 +174,11 @@ export async function POST(req: Request): Promise<Response> {
       let marked = false;
       if (runId) {
         const run = getRunById(db, runId);
-        if (run && run.kind === "analyze-structure" && (run.state === "done" || run.state === "applied")) {
+        if (
+          run &&
+          run.kind === "analyze-structure" &&
+          (run.state === "done" || run.state === "applied")
+        ) {
           updateRun(db, run.id, "applied");
           marked = true;
         }

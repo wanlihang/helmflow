@@ -2,17 +2,30 @@
 
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { NextResponse } from "next/server";
-import { getContractById, hasRunningRun, updateCellAgentStatus, listRunsByKind, listRunEvents, createRun, createRunEvent, updateRun, ensureVirtualCell } from "@helmflow/storage";
-import { HelmcodeManager } from "@helmflow/helmcode-manager";
-import {
-  runNode,
-  type NodeRunEvent,
-  type AllowedTool,
-} from "@helmflow/agent-runner";
 import { getDb } from "@/lib/db";
 import { guardCellOperable } from "@/lib/guard";
-import { isString, sseEncode, sseResponse, resolveSandboxPath, resolveHelmcodeRoot, createSseHeartbeat } from "@/lib/server-utils";
+import {
+  createSseHeartbeat,
+  isString,
+  resolveHelmcodeRoot,
+  resolveSandboxPath,
+  sseEncode,
+  sseResponse,
+} from "@/lib/server-utils";
+import { type AllowedTool, type NodeRunEvent, runNode } from "@helmflow/agent-runner";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
+import {
+  createRun,
+  createRunEvent,
+  ensureVirtualCell,
+  getContractById,
+  hasRunningRun,
+  listRunEvents,
+  listRunsByKind,
+  updateCellAgentStatus,
+  updateRun,
+} from "@helmflow/storage";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +50,7 @@ export async function GET(req: Request): Promise<Response> {
   const db = getDb();
   const runs = listRunsByKind(db, "code", 20);
 
-  let matchedRun: typeof runs[number] | undefined;
+  let matchedRun: (typeof runs)[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
 
   for (const r of runs) {
@@ -46,7 +59,9 @@ export async function GET(req: Request): Promise<Response> {
       try {
         const p = JSON.parse(ev.payload);
         return p.type === "code-start" && p.contractId === contractId;
-      } catch { return false; }
+      } catch {
+        return false;
+      }
     });
     if (startEvent) {
       matchedRun = r;
@@ -63,8 +78,13 @@ export async function GET(req: Request): Promise<Response> {
   for (const ev of [...matchedEvents].reverse()) {
     try {
       const p = JSON.parse(ev.payload);
-      if (p.type === "done") { result = p as Record<string, unknown>; break; }
-    } catch { /* skip */ }
+      if (p.type === "done") {
+        result = p as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      /* skip */
+    }
   }
 
   return NextResponse.json({
@@ -105,7 +125,10 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: `Contract not found: ${body.contractId}` }, { status: 404 });
   }
   if (contract.status !== "approved") {
-    return NextResponse.json({ error: `Contract must be approved, got '${contract.status}'` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Contract must be approved, got '${contract.status}'` },
+      { status: 400 },
+    );
   }
 
   const guard = guardCellOperable(db, contract.cellId);
@@ -114,7 +137,10 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (hasRunningRun(db, contract.cellId, "code")) {
-    return NextResponse.json({ error: "A code run is already in progress for this cell" }, { status: 409 });
+    return NextResponse.json(
+      { error: "A code run is already in progress for this cell" },
+      { status: 409 },
+    );
   }
 
   const sandboxPath = await resolveSandboxPath();
@@ -123,14 +149,19 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const helmcodeRoot = await resolveHelmcodeRoot();
-  const manager = helmcodeRoot ? new HelmcodeManager({ helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const manager = helmcodeRoot
+    ? new HelmcodeManager({ helmcodeRoot, preset: "java-ddd" })
+    : undefined;
 
   let systemPrompt: string;
   try {
     systemPrompt = manager ? manager.loadSkillBody("implement") : "";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `Failed to load implement SKILL: ${message}` }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to load implement SKILL: ${message}` },
+      { status: 500 },
+    );
   }
 
   // patterns + skill references + standards,统一走 manager(替代硬编码 resolveStandardsRoot)
@@ -204,13 +235,34 @@ ${contractMarkdown}
               if (event.type === "assistant.text") {
                 sse({ type: "token", text: event.text });
               } else if (event.type === "tool_use") {
-                sse({ type: "tool_use", toolUseId: event.toolUseId, name: event.name, input: event.input });
+                sse({
+                  type: "tool_use",
+                  toolUseId: event.toolUseId,
+                  name: event.name,
+                  input: event.input,
+                });
               } else if (event.type === "tool_result") {
-                sse({ type: "tool_result", toolUseId: event.toolUseId, isError: event.isError, preview: event.preview });
+                sse({
+                  type: "tool_result",
+                  toolUseId: event.toolUseId,
+                  isError: event.isError,
+                  preview: event.preview,
+                });
               } else if (event.type === "system.init") {
-                sse({ type: "system-init", sessionId: event.sessionId, cwd: event.cwd, model: event.model });
+                sse({
+                  type: "system-init",
+                  sessionId: event.sessionId,
+                  cwd: event.cwd,
+                  model: event.model,
+                });
               } else if (event.type === "result") {
-                sse({ type: "result-cost", success: event.success, turns: event.turns, durationMs: event.durationMs, costUsd: event.costUsd ?? null });
+                sse({
+                  type: "result-cost",
+                  success: event.success,
+                  turns: event.turns,
+                  durationMs: event.durationMs,
+                  costUsd: event.costUsd ?? null,
+                });
               }
             },
           });
@@ -226,12 +278,20 @@ ${contractMarkdown}
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           updateCellAgentStatus(db, contract.cellId, "blocked");
-          try { updateRun(db, run.id, "failed"); } catch { /* ignore */ }
+          try {
+            updateRun(db, run.id, "failed");
+          } catch {
+            /* ignore */
+          }
           sse({ type: "error", message });
         }
       } finally {
         stopHb();
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
     cancel() {

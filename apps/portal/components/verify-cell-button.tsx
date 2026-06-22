@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 
 interface VerifyCellButtonProps {
   cellId: string;
@@ -61,7 +61,9 @@ export function VerifyCellButton({ cellId }: VerifyCellButtonProps) {
         // 首次加载失败不致命
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
   }, [cellId]);
 
   const handleVerify = async () => {
@@ -125,12 +127,13 @@ export function VerifyCellButton({ cellId }: VerifyCellButtonProps) {
 
   return (
     <div className="space-y-2">
-      <Button variant="outline" size="sm" onClick={handleVerify} disabled={verifying && !resumedRunning}>
-        {resumedRunning
-          ? "🔄 重新验证"
-          : verifying
-            ? "验证中..."
-            : "验证正确性"}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleVerify}
+        disabled={verifying && !resumedRunning}
+      >
+        {resumedRunning ? "🔄 重新验证" : verifying ? "验证中..." : "验证正确性"}
       </Button>
 
       {resumedRunning && (
@@ -139,9 +142,7 @@ export function VerifyCellButton({ cellId }: VerifyCellButtonProps) {
         </div>
       )}
 
-      {progress && verifying && (
-        <div className="text-xs text-muted-foreground">{progress}</div>
-      )}
+      {progress && verifying && <div className="text-xs text-muted-foreground">{progress}</div>}
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
@@ -150,23 +151,29 @@ export function VerifyCellButton({ cellId }: VerifyCellButtonProps) {
       )}
 
       {results && (
-        <div className={`rounded-md border p-3 text-xs space-y-2 ${
-          results.pass
-            ? "border-green-200 bg-green-50"
-            : "border-red-200 bg-red-50"
-        }`}>
+        <div
+          className={`rounded-md border p-3 text-xs space-y-2 ${
+            results.pass ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+          }`}
+        >
           <div className={`font-semibold ${results.pass ? "text-green-700" : "text-red-700"}`}>
-            {results.pass ? "验证通过 — 所有 AC 测试正常" : "验证失败 — 部分 AC 测试未通过,建议重新实现"}
+            {results.pass
+              ? "验证通过 — 所有 AC 测试正常"
+              : "验证失败 — 部分 AC 测试未通过,建议重新实现"}
           </div>
           {results.acResults.length > 0 && (
             <ul className="space-y-1">
               {results.acResults.map((ac) => (
                 <li key={ac.acId} className="flex items-center gap-2">
-                  <span className={`inline-block h-2 w-2 rounded-full ${
-                    ac.status === "pass" ? "bg-green-500"
-                    : ac.status === "fail" ? "bg-red-500"
-                    : "bg-gray-400"
-                  }`} />
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      ac.status === "pass"
+                        ? "bg-green-500"
+                        : ac.status === "fail"
+                          ? "bg-red-500"
+                          : "bg-gray-400"
+                    }`}
+                  />
                   <span className="font-mono">{ac.acId}</span>
                   <span className="text-muted-foreground">
                     {ac.status === "no-test" ? "无测试覆盖" : ac.status}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { timeAgo } from "@/lib/format";
+import { useEffect, useState } from "react";
 
 interface QueueItem {
   id: string;
@@ -77,7 +77,9 @@ export function QueuePanel() {
       <p className="text-sm text-muted-foreground">
         常驻 worker 自动消费 <strong>已审批</strong> 契约,7×24 排队执行
         require→code→test→deploy。启动 worker:
-        <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs">pnpm worker:start</code>
+        <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+          pnpm worker:start
+        </code>
       </p>
 
       {pending + running + blocked === 0 ? (
@@ -116,10 +118,14 @@ export function QueuePanel() {
                   <td className="px-3 py-2 text-xs">
                     {i.attempt}/{i.maxAttempts}
                     {i.state === "blocked" && i.lastError ? (
-                      <span className="ml-1 text-red-600" title={i.lastError}>⚠</span>
+                      <span className="ml-1 text-red-600" title={i.lastError}>
+                        ⚠
+                      </span>
                     ) : null}
                   </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{timeAgo(i.updatedAt)}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {timeAgo(i.updatedAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>

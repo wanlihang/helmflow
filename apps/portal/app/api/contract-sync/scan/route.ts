@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { runContractSyncScan } from "@/lib/contract-sync-actions";
 import { getDb } from "@/lib/db";
 import { getCurrentProjectId } from "@/lib/project";
 import { resolveSandboxPath } from "@/lib/server-utils";
-import { runContractSyncScan } from "@/lib/contract-sync-actions";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
