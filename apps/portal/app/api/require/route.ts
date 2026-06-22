@@ -152,6 +152,15 @@ export async function GET(req: Request): Promise<Response> {
   let matchedRun: typeof runs[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
 
+  // P1.3: 聚合该 cell 的历史需求列表(供前端"历史需求"回填)。
+  interface HistoryItem {
+    runId: string;
+    userRequest: string;
+    state: string;
+    startedAt: string;
+  }
+  const history: HistoryItem[] = [];
+
   for (const r of runs) {
     const events = listRunEvents(db, r.id);
     const startEvent = events.find((ev) => {
@@ -160,15 +169,28 @@ export async function GET(req: Request): Promise<Response> {
         return p.type === "require-start" && p.cellId === cellId;
       } catch { return false; }
     });
-    if (startEvent) {
+    if (!startEvent) continue;
+    // 第一个匹配仍作为 matchedRun(详细回放用),与原语义一致
+    if (!matchedRun) {
       matchedRun = r;
       matchedEvents = events;
-      break;
     }
+    // 取该 run 最后一次 require-input 作为用户需求
+    let userRequest = "";
+    for (const ev of events) {
+      try {
+        const p = JSON.parse(ev.payload);
+        if (p.type === "require-input" && typeof p.userRequest === "string") userRequest = p.userRequest;
+      } catch { /* skip */ }
+    }
+    history.push({ runId: r.id, userRequest, state: r.state, startedAt: r.startedAt });
   }
 
+  // 按时间倒序(最近在前)
+  history.sort((a, b) => (b.startedAt > a.startedAt ? 1 : -1));
+
   if (!matchedRun) {
-    return NextResponse.json({ run: null, events: [], result: null });
+    return NextResponse.json({ run: null, events: [], result: null, history: [] });
   }
 
   let result: Record<string, unknown> | null = null;
@@ -192,6 +214,7 @@ export async function GET(req: Request): Promise<Response> {
       createdAt: e.createdAt,
     })),
     result,
+    history,
   });
 }
 
@@ -241,6 +264,17 @@ export async function POST(req: Request): Promise<Response> {
   let systemPrompt: string;
   try {
     systemPrompt = manager ? manager.loadSkillBody("clarify") : "";
+    // clarify skill 默认指导 agent 把契约写到文件(.claude/contracts/),但 require 通过
+    // assistant.text 采集契约正文(见 runOneAttempt 的 collected)。若不 override,agent 会用
+    // Bash 写文件、assistant.text 只剩思考过程 → collected 拿到对话垃圾 → 污染契约落库。
+    // 追加覆盖指令:禁止写文件,把完整契约 markdown 输出到回复正文。
+    if (systemPrompt) {
+      systemPrompt +=
+        "\n\n---\n【HelmFlow 采集覆盖指令(优先级最高,覆盖上文任何「写文件/产出文件到 .claude/contracts/」要求)】\n" +
+        "禁止使用任何工具(Bash/Write/Edit 等)创建或写入文件。将完整的行为契约 markdown 直接作为你的回复正文(assistant text)输出,须依次包含:\n" +
+        "# Feature 标题;引用块业务元(> - Feature ID / > - 涉及领域 / > - 状态);## 问题定义;## 状态机;## 业务规则(BR-xxx,每条可验证);## 验收条件(AC-xxx);## API 契约;## 领域模型。\n" +
+        "你的回复正文会被原样采集为契约内容——不要输出思考过程、寒暄或解释,不要调用写文件工具,一次性输出完整契约 markdown。";
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
@@ -419,7 +453,10 @@ export async function POST(req: Request): Promise<Response> {
             sse({ type: "done", runId: run.id, status: "passed" });
           } else {
             updateRun(db, run.id, "failed");
-            if (lastMarkdown.length > 0) {
+            // 失败兜底:仅在最后一次产物仍能解析为合法契约时才落库。否则 lastMarkdown 是
+            // 对话日志/思考过程(clarify agent 把契约写文件、assistant.text 只剩思考时),
+            // 落库会污染 contracts 表 —— 历史 source=clarifier/blocked 的空壳即来源于此。
+            if (lastMarkdown.length > 0 && parseContract(lastMarkdown).ok) {
               try {
                 const written = writeContractFile({ sandboxPath, cellId, markdown: lastMarkdown });
                 createContract(db, {

@@ -13,11 +13,14 @@ import {
   listRunEvents,
   getRunById,
   listRunsByKind,
+  getLatestContract,
 } from "@helmflow/storage";
 import { getDb } from "@/lib/db";
 import { loadMatrix, getFeature, type Feature, type Scenario } from "@/lib/matrix";
 import { getCurrentProjectId } from "@/lib/project";
 import { isString, sseEncode, sseResponse, resolveSandboxPath } from "@/lib/server-utils";
+import { isAbsolute, join } from "node:path";
+import { readFileSync } from "node:fs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,12 +101,33 @@ function buildScanPrompt(): string {
 // Prompt builders — Phase 2 (classify)
 // ---------------------------------------------------------------------------
 
-function buildClassifyPrompt(inventory: InventoryItem[], cells: CellInfo[]): string {
+/**
+ * 读取 cell 对应的行为契约全文(权威依据)。无契约返回 null(classify 回退纯 inventory)。
+ * 复用 verify-cell 的 getLatestContract 模式;markdownPath 可能绝对(DB 实测)或相对,显式判断
+ * 避开 node path.join 把绝对第二参当相对拼接的陷阱。
+ */
+function loadContractMd(db: ReturnType<typeof getDb>, cellId: string): string | null {
+  const row = getLatestContract(db, cellId);
+  if (!row?.markdownPath) return null;
+  const p = isAbsolute(row.markdownPath) ? row.markdownPath : join(process.cwd(), row.markdownPath);
+  try {
+    return readFileSync(p, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+function buildClassifyPrompt(inventory: InventoryItem[], cells: CellInfo[], contracts: Map<string, string>): string {
   const inventoryJson = JSON.stringify(inventory, null, 2);
 
   const cellLines = cells.map((c) => {
     // 不依赖预设 implementation(可能为空)——给 LLM feature name/domain 让它从 inventory 语义匹配
-    return `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
+    const base = `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
+    const contract = contracts.get(c.cellId);
+    // 有契约:附全文作为权威依据(含 BR/AC/分层);无契约:仅按 inventory 判断
+    return contract
+      ? `${base}\n\n#### 该 cell 的行为契约(权威依据)\n${contract}`
+      : `${base}\n(无行为契约,仅按 inventory 语义判断)`;
   });
 
   return `## 任务
@@ -395,8 +419,14 @@ async function runCellAnalysis(
   run: { id: string },
   sse: (payload: unknown) => void,
 ): Promise<void> {
-  const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze);
-  const systemPrompt = "You are a code analysis assistant. Analyze Java source code to determine implementation status of features. Be precise and factual.";
+  // 读取各 cell 的行为契约(若已建立映射),作为权威依据注入 prompt
+  const contracts = new Map<string, string>();
+  for (const c of cellsToAnalyze) {
+    const md = loadContractMd(db, c.cellId);
+    if (md) contracts.set(c.cellId, md);
+  }
+  const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze, contracts);
+  const systemPrompt = "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
 
   sse({ type: "analyze-start", runId: run.id, totalCells: cellsToAnalyze.length, scope: "cell" });
 
@@ -533,7 +563,7 @@ async function runBulkAnalysis(
   // ---- Phase 2: per-cell classify(拆分!每 cell 独立 run,故障隔离) ----
   sse({ type: "classify-start", cellCount: cellsToAnalyze.length, perCell: true });
   const allResults: AnalysisResult[] = [];
-  const classifySystemPrompt = "You are a precise status classifier. Based on the code inventory, classify the cell's implementation status. Output ONLY the JSON array wrapped in <ANALYSIS_RESULT> tags, nothing else.";
+  const classifySystemPrompt = "You are a precise status classifier. 优先对照该 cell 的行为契约判断:用契约的 BR/AC 作为「实现该满足什么」的权威,在 inventory(代码清单)中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,在 inventory 中确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时回退纯 inventory 语义匹配。输出仍为 <ANALYSIS_RESULT> 标签包裹的 JSON 数组,只输出该数组。";
 
   /** 529 限流自动重试(指数退避: 3s→6s→12s, 最多 3 次) */
   async function runClassifyWithRetry(opts: { cwd: string; systemPrompt: string; userPrompt: string }, sseFn: (p: unknown) => void): Promise<{ text: string; durationMs: number }> {
@@ -574,10 +604,15 @@ async function runBulkAnalysis(
       cellRun = createRun(db, cell.cellId, "analyze");
       cellSse({ type: "classify-cell-start", cellId: cell.cellId, runId: cellRun.id, progress: `${cellIdx + 1}/${cellsToAnalyze.length}` });
 
+      // 读取该 cell 的行为契约(若已建立映射),作为 classify 的权威依据注入 prompt
+      const contracts = new Map<string, string>();
+      const contractMd = loadContractMd(db, cell.cellId);
+      if (contractMd) contracts.set(cell.cellId, contractMd);
+
       const classifyResult = await runClassifyWithRetry({
         cwd: sandboxPath,
         systemPrompt: classifySystemPrompt,
-        userPrompt: buildClassifyPrompt(inventory, [cell]),
+        userPrompt: buildClassifyPrompt(inventory, [cell], contracts),
       }, cellSse);
       const parsed = parseAnalysisOutput(classifyResult.text);
 
@@ -631,8 +666,14 @@ async function runFallbackBulkAnalysis(
 ): Promise<void> {
   sse({ type: "classify-start", cellCount: cellsToAnalyze.length, fallback: true });
 
-  const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze);
-  const systemPrompt = "You are a code analysis assistant. Analyze Java source code to determine implementation status of features. Be precise and factual.";
+  // 读取各 cell 的行为契约(若已建立映射),作为权威依据注入 prompt
+  const contracts = new Map<string, string>();
+  for (const c of cellsToAnalyze) {
+    const md = loadContractMd(db, c.cellId);
+    if (md) contracts.set(c.cellId, md);
+  }
+  const userPrompt = buildCellAnalysisPrompt(cellsToAnalyze, contracts);
+  const systemPrompt = "You are a code analysis assistant. 对照每个 cell 的行为契约(若有)判断实现状态:契约的 BR/AC 是「实现该满足什么」的权威,用 Read/Bash 在代码中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时按代码扫描判断。Be precise and factual.";
 
   const collectedText: string[] = [];
   const nodeResult = await runNode({
@@ -670,9 +711,13 @@ async function runFallbackBulkAnalysis(
 // 共享 prompt / result builder
 // ---------------------------------------------------------------------------
 
-function buildCellAnalysisPrompt(cells: CellInfo[]): string {
+function buildCellAnalysisPrompt(cells: CellInfo[], contracts: Map<string, string>): string {
   const lines = cells.map((c) => {
-    return `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
+    const base = `- cellId: ${c.cellId} | feature: ${c.feature.name}(${c.feature.id}) | domain: ${c.feature.implementation.context || c.feature.id.split("-")[0]} | currentStatus: ${c.scenario.status}`;
+    const contract = contracts.get(c.cellId);
+    return contract
+      ? `${base}\n\n#### 该 cell 的行为契约(权威依据)\n${contract}`
+      : `${base}\n(无行为契约,仅按代码扫描判断)`;
   });
 
   return `## 任务

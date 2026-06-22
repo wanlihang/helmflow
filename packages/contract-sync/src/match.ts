@@ -6,8 +6,9 @@
  *
  * 打分信号:
  *   - 人工映射      → conf 1.0,直接 matched
+ *   - 正文 cell 引用 → +0.7(强;契约自声明「覆盖 D-01」,多引用并列则落 pending)
  *   - 领域一致      → +0.3
- *   - handler 命中  → +0.4(最强)
+ *   - handler 命中  → +0.4
  *   - action 命中   → +0.2
  *   - 短名子串      → +0.15(弱)
  *
@@ -44,6 +45,13 @@ function pickScenario(feature: MatrixFeature): { name: string } | null {
 function scoreOne(meta: HelmcodeContractMeta, feature: MatrixFeature): CellCandidate {
   let score = 0;
   const reasons: string[] = [];
+
+  // 正文 cell 引用(强信号):契约正文「覆盖 D-01 创建」这类自声明。老契约元信息无 matrixCellId
+  // 时的关键依据。rawCellRefs 含 AC-00/DR-XX 等噪声,但 includes(feature.id) 只匹配真实 matrix feature。
+  if (meta.rawCellRefs.includes(feature.id)) {
+    score += 0.7;
+    reasons.push(`正文引用:${feature.id}`);
+  }
 
   // 领域一致
   if (meta.domain && feature.domain && norm(meta.domain) === norm(feature.domain)) {

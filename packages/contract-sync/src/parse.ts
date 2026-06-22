@@ -96,6 +96,10 @@ export function parseHelmcodeContract(
   // matrixCellId:HelmFlow 专属字段(自产契约携带,导入时精确命中 cell)。可选。
   const matrixCellId = extractQuoteField(markdown, "matrixCellId") ?? "";
 
+  // 正文 cell 引用:抓全文所有 [A-Z]{1,3}-\d{2} token(去重)。老契约元信息无 matrixCellId 时,
+  // 正文「覆盖 D-01 创建」这类自声明是关键匹配信号。含 AC-00/DR-XX 等噪声,match 阶段按 feature.id 过滤。
+  const rawCellRefs = Array.from(new Set(markdown.match(/\b[A-Z]{1,3}-\d{2}\b/g) ?? []));
+
   if (!featureId) {
     // fallback:从引用块 `# Feature: F001-recon-task` 标题提取
     const titleM = markdown.match(/^#\s+Feature:\s*(\S+)\s*$/m);
@@ -131,6 +135,7 @@ export function parseHelmcodeContract(
     domain: domain || "",
     status: statusParse.data as HelmcodeStatus,
     matrixCellId,
+    rawCellRefs,
     acCount,
     brCount,
     hasDomainModel,

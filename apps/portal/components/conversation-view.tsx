@@ -10,6 +10,8 @@ interface ConversationTurn {
   toolName?: string;
   toolInput?: string;
   isError?: boolean;
+  /** agent.input 携带的 system prompt(调用模型时传的完整系统提示),折叠展示 */
+  systemPrompt?: string;
 }
 
 /**
@@ -20,7 +22,13 @@ interface ConversationTurn {
 function applyEvent(next: ConversationTurn[], payload: Record<string, unknown>): void {
   switch (payload.type) {
     case "agent.input": {
-      next.push({ role: "input", content: (payload.userPrompt as string) || "" });
+      // 同时保留 systemPrompt(调用模型传的系统提示)与 userPrompt,
+      // 对话记录才能完整还原「传给模型什么 → 模型回什么」。
+      next.push({
+        role: "input",
+        content: (payload.userPrompt as string) || "",
+        systemPrompt: (payload.systemPrompt as string) || undefined,
+      });
       break;
     }
     case "token":
@@ -201,6 +209,16 @@ export function ConversationView({ runId }: ConversationViewProps) {
           <div key={i}>
             {turn.role === "input" && (
               <div className="text-blue-400">
+                {turn.systemPrompt && (
+                  <details className="mb-1">
+                    <summary className="cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-400">
+                      📜 system prompt({turn.systemPrompt.length} 字符,点击展开)
+                    </summary>
+                    <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[10px] text-zinc-500">
+                      {turn.systemPrompt}
+                    </pre>
+                  </details>
+                )}
                 <span className="text-blue-600">❯ </span>
                 <span className="whitespace-pre-wrap">{turn.content || "(空)"}</span>
               </div>

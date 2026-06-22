@@ -1,9 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 interface FeatureOption {
   id: string;
@@ -42,9 +42,18 @@ interface PanelProps {
 }
 
 const STATE_LABEL: Record<string, { text: string; cls: string }> = {
-  matched: { text: "已同步", cls: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300" },
-  pending: { text: "待确认", cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300" },
-  unmatched: { text: "未匹配", cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
+  matched: {
+    text: "已同步",
+    cls: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
+  },
+  pending: {
+    text: "待确认",
+    cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300",
+  },
+  unmatched: {
+    text: "未匹配",
+    cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  },
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -58,12 +67,22 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<SyncResult[] | null>(null);
-  const [summary, setSummary] = useState<{ matched: number; pending: number; unmatched: number } | null>(null);
-  const [autoApply, setAutoApply] = useState<{ applied: string[]; skipped: string[]; errors: string[] } | null>(null);
+  const [summary, setSummary] = useState<{
+    matched: number;
+    pending: number;
+    unmatched: number;
+  } | null>(null);
+  const [autoApply, setAutoApply] = useState<{
+    applied: string[];
+    skipped: string[];
+    errors: string[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   // 待确认项的临时选择:contractFeatureId → { featureId, scenarioName }
-  const [pendingPick, setPendingPick] = useState<Record<string, { featureId: string; scenarioName: string }>>({});
+  const [pendingPick, setPendingPick] = useState<
+    Record<string, { featureId: string; scenarioName: string }>
+  >({});
 
   const handleScan = async () => {
     setScanning(true);
@@ -149,17 +168,20 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
   };
 
   const renderRow = (r: SyncResult, actionable: boolean) => (
-    <div
-      key={r.id}
-      className="rounded-md border border-border bg-card p-3 text-sm space-y-2"
-    >
+    <div key={r.id} className="rounded-md border border-border bg-card p-3 text-sm space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <code className="font-mono text-xs font-semibold">{r.contractFeatureId}</code>
-        <Badge variant="outline" className={STATUS_BADGE[r.helmcodeStatus] ?? "bg-gray-100 text-gray-600"}>
+        <Badge
+          variant="outline"
+          className={STATUS_BADGE[r.helmcodeStatus] ?? "bg-gray-100 text-gray-600"}
+        >
           HelmCode: {r.helmcodeStatus}
         </Badge>
         {r.targetScenarioStatus && (
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+          <Badge
+            variant="outline"
+            className="bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+          >
             → {r.targetScenarioStatus}
           </Badge>
         )}
@@ -175,7 +197,7 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
         </div>
       )}
 
-      {actionable && r.state === "pending" && (
+      {actionable && (r.state === "pending" || r.state === "unmatched") && (
         <div className="space-y-2 border-t border-border pt-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <label className="text-muted-foreground">指认功能点:</label>
@@ -186,7 +208,10 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
                 const fid = e.target.value;
                 const feat = features.find((f) => f.id === fid);
                 const sname = feat?.scenarios.find((s) => s.status !== "废弃")?.name ?? "";
-                setPendingPick((p) => ({ ...p, [r.contractFeatureId]: { featureId: fid, scenarioName: sname } }));
+                setPendingPick((p) => ({
+                  ...p,
+                  [r.contractFeatureId]: { featureId: fid, scenarioName: sname },
+                }));
               }}
             >
               <option value="" disabled>
@@ -243,10 +268,8 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
         </div>
       )}
 
-      {r.state === "unmatched" && r.candidates.length > 0 && (
-        <div className="text-xs text-muted-foreground">
-          无足够候选,跳过。
-        </div>
+      {r.state === "unmatched" && (
+        <div className="text-xs text-muted-foreground">未自动匹配,可在上方手动指认功能点。</div>
       )}
     </div>
   );
@@ -276,7 +299,11 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
         )}
       </div>
 
-      {error && <div className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+          {error}
+        </div>
+      )}
 
       {results && results.length === 0 && (
         <div className="rounded-md border border-border bg-muted p-4 text-sm text-muted-foreground">
@@ -313,7 +340,7 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
           <p className="text-xs text-muted-foreground">
             以下契约未找到对应功能点,已跳过(不强求全部对应)。
           </p>
-          <div className="grid gap-2">{unmatched.map((r) => renderRow(r, false))}</div>
+          <div className="grid gap-2">{unmatched.map((r) => renderRow(r, true))}</div>
         </section>
       )}
     </div>

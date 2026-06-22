@@ -43,6 +43,12 @@ export interface HelmcodeContractMeta {
   status: HelmcodeStatus;
   /** HelmFlow 专属字段(仅 HelmFlow 自产契约携带):精确命中 cell,格式 "D-01__正式签约" */
   matrixCellId: string;
+  /**
+   * 正文里抓到的所有 `[A-Z]{1,3}-\d{2}` token(去重,含 AC-00/DR-XX 等编号噪声)。
+   * match 阶段用 `includes(feature.id)` 只匹配真实 matrix feature(D-/P-/PR-),噪声自动过滤。
+   * 用于「覆盖 D-01 创建」这类契约自声明的 cell 关联(老契约元信息无 matrixCellId 时的关键信号)。
+   */
+  rawCellRefs: string[];
   acCount: number;
   brCount: number;
   hasDomainModel: boolean;
