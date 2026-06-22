@@ -1,19 +1,19 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 interface StartFeatureDialogProps {
   cellId: string;
@@ -83,8 +83,7 @@ function summarizeToolInput(name: string, input: unknown): string {
   if (typeof input !== "object") return String(input).slice(0, 120);
   const obj = input as Record<string, unknown>;
   if (name === "Read" && typeof obj.file_path === "string") return obj.file_path;
-  if (name === "Bash" && typeof obj.command === "string")
-    return obj.command.slice(0, 120);
+  if (name === "Bash" && typeof obj.command === "string") return obj.command.slice(0, 120);
   try {
     return JSON.stringify(obj).slice(0, 120);
   } catch {
@@ -103,6 +102,19 @@ function parseSseLine(line: string): SseEvent | null {
   }
 }
 
+/** P1.1: 需求草稿的 localStorage 键,按 cellId 隔离。 */
+function draftKey(cellId: string): string {
+  return `helmflow:draft:require:${cellId}`;
+}
+
+/** P1.3: 历史 require run 的摘要(用于"历史需求"回填)。 */
+interface RequireHistoryItem {
+  runId: string;
+  userRequest: string;
+  state: string;
+  startedAt: string;
+}
+
 export function StartFeatureDialog({
   cellId,
   featureName,
@@ -118,9 +130,7 @@ export function StartFeatureDialog({
   const [criticIssues, setCriticIssues] = useState<
     Array<{ round: number; issues: Array<{ check: string; detail: string }> }>
   >([]);
-  const [finalStatus, setFinalStatus] = useState<
-    "passed" | "blocked" | null
-  >(null);
+  const [finalStatus, setFinalStatus] = useState<"passed" | "blocked" | null>(null);
   const [tools, setTools] = useState<ToolCallEntry[]>([]);
   const [sessionInfo, setSessionInfo] = useState<{
     cwd: string;
@@ -132,7 +142,7 @@ export function StartFeatureDialog({
     costUsd: number | null;
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  
+
   const abortStream = () => {
     if (abortRef.current !== null) {
       abortRef.current.abort();
@@ -149,9 +159,16 @@ export function StartFeatureDialog({
   // ─── On mount: restore latest Clarifier run from DB ───────────────
   // 若上次运行还在 running(但 SSE 已断)或已完成,自动打开对话框并回放状态。
   const [resumedRunning, setResumedRunning] = useState(false);
+  // P1.3: 该 cell 的历史需求列表(从 GET /api/require 的 history 字段加载)
+  const [history, setHistory] = useState<RequireHistoryItem[]>([]);
 
   useEffect(() => {
     let stopped = false;
+    // P1.1: 优先读本地草稿(含未提交编辑,比 DB 新),同步、在 fetch 之前执行。
+    if (typeof window !== "undefined") {
+      const draft = window.localStorage.getItem(draftKey(cellId));
+      if (draft && draft.length > 0) setUserRequest(draft);
+    }
     (async () => {
       try {
         const res = await fetch(`/api/require?cellId=${encodeURIComponent(cellId)}`);
@@ -159,14 +176,39 @@ export function StartFeatureDialog({
         const data = (await res.json()) as {
           run: { id: string; state: string; startedAt: string } | null;
           events: Array<{ type: string; payload: Record<string, unknown> }>;
+          history?: RequireHistoryItem[];
         };
-        if (stopped || !data.run) return;
+        if (stopped) return;
+        if (Array.isArray(data.history)) setHistory(data.history);
+        if (!data.run) return;
+
+        // P0/P1.1: 回填上次需求。若有本地草稿(未提交编辑)则保留草稿,不让 DB 覆盖。
+        // require-input 事件在 POST /api/require 时即落库;放在 hasStreamContent 之前,529 立即失败也能回填。
+        const hasLocalDraft =
+          typeof window !== "undefined" &&
+          (window.localStorage.getItem(draftKey(cellId)) ?? "").length > 0;
+        if (!hasLocalDraft) {
+          for (const ev of data.events) {
+            const p = ev.payload;
+            if (
+              p.type === "require-input" &&
+              typeof p.userRequest === "string" &&
+              p.userRequest.length > 0
+            ) {
+              setUserRequest(p.userRequest);
+            }
+          }
+        }
 
         // 仅当上次 run 仍在进行中时才自动打开对话框(核心:刷新能看到任务进行中);
         // done/failed 不打扰 — 详情页会通过 router.refresh 展示契约/状态,用户可手动打开查看历史
         const isRunning = data.run.state === "running";
-        const hasStreamContent = data.events.some((e) =>
-          e.type === "token" || e.type === "tool_use" || e.type === "done" || e.type === "contract-draft",
+        const hasStreamContent = data.events.some(
+          (e) =>
+            e.type === "token" ||
+            e.type === "tool_use" ||
+            e.type === "done" ||
+            e.type === "contract-draft",
         );
         if (!hasStreamContent) return;
         if (isRunning) setOpen(true);
@@ -201,7 +243,9 @@ export function StartFeatureDialog({
               ...prev,
               {
                 round: typeof p.round === "number" ? p.round : 0,
-                issues: Array.isArray(p.issues) ? (p.issues as Array<{ check: string; detail: string }>) : [],
+                issues: Array.isArray(p.issues)
+                  ? (p.issues as Array<{ check: string; detail: string }>)
+                  : [],
               },
             ]);
           } else if (p.type === "done") {
@@ -217,19 +261,38 @@ export function StartFeatureDialog({
         // 首次加载失败不致命
       }
     })();
-    return () => { stopped = true; };
+    return () => {
+      stopped = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cellId]);
+
+  // P1.1: 防抖持久化草稿到 localStorage(按 cellId 隔离),刷新/崩溃不丢未提交的编辑。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = draftKey(cellId);
+    const t = window.setTimeout(() => {
+      if (userRequest.trim().length > 0) {
+        window.localStorage.setItem(key, userRequest);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [userRequest, cellId]);
 
   // Don't reset everything on close — keep the result visible on reopen.
   // Only reset the "input" state, not the "output" state.
   const resetInput = () => {
     setUserRequest("");
+    // P1.1: 清空输入同时清掉本地草稿
+    if (typeof window !== "undefined") window.localStorage.removeItem(draftKey(cellId));
   };
 
+  // 清空「输出」状态,但保留 userRequest —— 供"用同样需求重新运行"。
+  // 想清空输入请用输入框旁的「清空」按钮(resetInput)。
   const resetAll = () => {
     abortStream();
-    setUserRequest("");
     setClarifying(false);
     setResumedRunning(false);
     setClarifierOutput("");
@@ -239,6 +302,12 @@ export function StartFeatureDialog({
     setTools([]);
     setSessionInfo(null);
     setCostInfo(null);
+  };
+
+  // P1.3: 点击某条历史需求 → 回填到输入框;顺带清输出回到可编辑/可运行态。
+  const applyHistory = (req: string) => {
+    resetAll();
+    setUserRequest(req);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -338,10 +407,7 @@ export function StartFeatureDialog({
             aggregated = "";
             setClarifierOutput("");
           } else if (ev.type === "critic-fail") {
-            setCriticIssues((prev) => [
-              ...prev,
-              { round: ev.round, issues: ev.issues },
-            ]);
+            setCriticIssues((prev) => [...prev, { round: ev.round, issues: ev.issues }]);
           } else if (ev.type === "contract-draft") {
             router.refresh();
           } else if (ev.type === "done") {
@@ -349,6 +415,8 @@ export function StartFeatureDialog({
               setFinalStatus("blocked");
             } else {
               setFinalStatus("passed");
+              // P1.1: 成功落库后清草稿,下次以 DB 中最新需求为准(草稿与 DB 已一致)。
+              if (typeof window !== "undefined") window.localStorage.removeItem(draftKey(cellId));
             }
             router.refresh();
             finished = true;
@@ -372,8 +440,17 @@ export function StartFeatureDialog({
   };
 
   // Determine if we have a "completed" result to show (from this session or existing)
-  const hasCompletedResult = finalStatus !== null || (existingContract && !clarifying && !clarifierOutput);
-  const displayStatus = finalStatus ?? (existingContract?.status === "draft" ? "passed" as const : existingContract?.status === "blocked" ? "blocked" as const : null);
+  const hasCompletedResult =
+    finalStatus !== null || (existingContract && !clarifying && !clarifierOutput);
+  const displayStatus =
+    finalStatus ??
+    (existingContract?.status === "draft"
+      ? ("passed" as const)
+      : existingContract?.status === "blocked"
+        ? ("blocked" as const)
+        : null);
+  // P1.2: 失败态(blocked 或调用报错)——直接展示输入区,带保留需求 +「用同样需求重试」。
+  const isFailed = finalStatus === "blocked" || errorMessage !== null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -386,19 +463,20 @@ export function StartFeatureDialog({
             <span className="font-mono">{cellId}</span> · {featureName}
           </DialogTitle>
           <DialogDescription>
-            描述需求,运行 Clarifier 生成 Problem / State Machine / Business Rules /
-            Acceptance Criteria / API Contract / Domain Model。
+            描述需求,运行 Clarifier 生成 Problem / State Machine / Business Rules / Acceptance
+            Criteria / API Contract / Domain Model。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           {resumedRunning && (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-              ⚠️ 检测到上次 Clarifier 运行仍在进行中(SSE 连接已断)。可填写需求后点击「运行 Clarifier」重新发起。
+              ⚠️ 检测到上次 Clarifier 运行仍在进行中(SSE
+              连接已断)。已为你恢复上次的需求,可直接点击「运行 Clarifier」重新发起。
             </div>
           )}
-          {/* Input area: only show when no result is displayed or user wants to re-run */}
-          {(!hasCompletedResult || clarifying) && (
+          {/* Input area: 首次 / 重跑 / 失败态都显示。失败态下带着保留的需求 +「用同样需求重试」。 */}
+          {(!hasCompletedResult || clarifying || isFailed) && (
             <>
               <label className="block text-sm font-medium" htmlFor="userRequest">
                 你的需求描述
@@ -412,15 +490,62 @@ export function StartFeatureDialog({
                 rows={4}
               />
               <div className="flex flex-wrap gap-2">
-                <Button onClick={runClarifier} disabled={clarifying && !resumedRunning} variant="default">
+                <Button
+                  onClick={runClarifier}
+                  disabled={clarifying && !resumedRunning}
+                  variant="default"
+                >
                   {resumedRunning
                     ? "🔄 重新运行 Clarifier"
                     : clarifying
                       ? "Clarifier 运行中..."
-                      : "运行 Clarifier"}
+                      : isFailed
+                        ? "🔄 用同样需求重试"
+                        : "运行 Clarifier"}
                 </Button>
+                {userRequest.trim().length > 0 && !clarifying && (
+                  <Button onClick={resetInput} variant="ghost" size="sm">
+                    清空
+                  </Button>
+                )}
               </div>
             </>
+          )}
+
+          {/* P1.3: 历史需求列表,点击回填到输入框 */}
+          {history.length > 0 && (
+            <details className="rounded-md border border-border bg-muted/30 p-2 text-xs">
+              <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+                📋 历史需求({history.length})
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {history.map((h) => (
+                  <li key={h.runId}>
+                    <button
+                      type="button"
+                      onClick={() => applyHistory(h.userRequest)}
+                      disabled={clarifying}
+                      className="flex w-full items-start gap-2 rounded p-1 text-left hover:bg-muted disabled:opacity-50"
+                    >
+                      <span
+                        className={`mt-0.5 shrink-0 rounded px-1 text-[10px] font-semibold ${
+                          h.state === "done"
+                            ? "bg-green-100 text-green-700"
+                            : h.state === "failed"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-zinc-200 text-zinc-700"
+                        }`}
+                      >
+                        {h.state}
+                      </span>
+                      <span className="whitespace-pre-wrap break-all text-foreground">
+                        {h.userRequest.slice(0, 80) || "(空)"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
 
           {errorMessage && (
@@ -446,9 +571,7 @@ export function StartFeatureDialog({
                   <li key={t.toolUseId} className="leading-snug">
                     <span
                       className={
-                        t.isError
-                          ? "text-red-700 font-semibold"
-                          : "text-blue-700 font-semibold"
+                        t.isError ? "text-red-700 font-semibold" : "text-blue-700 font-semibold"
                       }
                     >
                       {t.name}
@@ -464,9 +587,7 @@ export function StartFeatureDialog({
             <div className="rounded-md border border-border bg-muted/40 p-2 text-[10px] text-muted-foreground font-mono">
               turns={costInfo.turns} · duration=
               {Math.round(costInfo.durationMs / 100) / 10}s · cost=
-              {costInfo.costUsd !== null
-                ? `$${costInfo.costUsd.toFixed(4)}`
-                : "?"}
+              {costInfo.costUsd !== null ? `$${costInfo.costUsd.toFixed(4)}` : "?"}
             </div>
           )}
 
@@ -529,8 +650,8 @@ export function StartFeatureDialog({
         </div>
 
         <DialogFooter>
-          {/* Allow re-running after completion */}
-          {hasCompletedResult && !clarifying && (
+          {/* Allow re-running after completion(失败态由输入区的「用同样需求重试」接管,这里不重复显示) */}
+          {hasCompletedResult && !clarifying && !isFailed && (
             <Button
               variant="outline"
               onClick={() => {

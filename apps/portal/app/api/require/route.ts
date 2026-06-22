@@ -3,34 +3,37 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { NextResponse } from "next/server";
-import { parseContract } from "@helmflow/contract-schema";
-import { runClarifierCritic, type Issue } from "@helmflow/agent-core";
-import { HelmcodeManager } from "@helmflow/helmcode-manager";
-import { scanJavaInventory } from "@helmflow/adapter-java-ddd";
+import { getDb } from "@/lib/db";
+import { guardCellOperable } from "@/lib/guard";
+import { type Feature, getDomainOfFeature, getFeature, loadMatrix } from "@/lib/matrix";
 import {
-  runNode,
-  runClassify,
-  type NodeRunEvent,
-} from "@helmflow/agent-runner";
+  createSseHeartbeat,
+  isString,
+  resolveHelmcodeRoot,
+  resolveSandboxPath,
+  sseEncode,
+  sseResponse,
+} from "@/lib/server-utils";
+import { scanJavaInventory } from "@helmflow/adapter-java-ddd";
+import { type Issue, runClarifierCritic } from "@helmflow/agent-core";
+import { type NodeRunEvent, runClassify, runNode } from "@helmflow/agent-runner";
+import { parseContract } from "@helmflow/contract-schema";
+import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
   createAttempt,
   createContract,
   createRun,
   createRunEvent,
-  updateAttempt,
-  updateRun,
-  updateProjectStandards,
-  updateFeatureImplementation,
-  cellId as makeCellId,
-  updateCellAgentStatus,
-  listRunsByKind,
   listRunEvents,
+  listRunsByKind,
+  cellId as makeCellId,
+  updateAttempt,
+  updateCellAgentStatus,
+  updateFeatureImplementation,
+  updateProjectStandards,
+  updateRun,
 } from "@helmflow/storage";
-import { loadMatrix, getFeature, getDomainOfFeature, type Feature } from "@/lib/matrix";
-import { getDb } from "@/lib/db";
-import { guardCellOperable } from "@/lib/guard";
-import { isString, sseEncode, sseResponse, resolveHelmcodeRoot, resolveSandboxPath, createSseHeartbeat } from "@/lib/server-utils";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,8 +48,7 @@ interface RequireRequestBody {
 }
 
 function buildReflection(issues: Issue[]): string {
-  const header =
-    "## 上一轮 Critic 反馈(请在本轮重写时严格修复以下问题)";
+  const header = "## 上一轮 Critic 反馈(请在本轮重写时严格修复以下问题)";
   const lines = issues.map((i) => `- [${i.check}] ${i.detail}`);
   return [header, ...lines].join("\n");
 }
@@ -64,9 +66,10 @@ function buildUserPrompt(args: {
   // 需改造=已存在实现但不符规范/契约,需按 HelmCode 标准治理对齐;待实现=尚未落地。
   const impl = args.feature.implementation;
   const hasImpl = impl.handler || impl.actions.length > 0;
-  const scenarioContext = args.scenarioStatus === "需改造"
-    ? `## 场景上下文\n本功能在「${args.scenarioName}」场景下已存在实现,但需按 HelmCode 规范治理对齐。\n实现定位: handler=${impl.handler || "(未指定)"}, actions=${impl.actions.join(", ") || "(无)"}。\n请基于现有实现行为,产出符合规范的行为契约。`
-    : `## 场景上下文\n本功能在「${args.scenarioName}」场景下尚未落地,为待实现需求。`;
+  const scenarioContext =
+    args.scenarioStatus === "需改造"
+      ? `## 场景上下文\n本功能在「${args.scenarioName}」场景下已存在实现,但需按 HelmCode 规范治理对齐。\n实现定位: handler=${impl.handler || "(未指定)"}, actions=${impl.actions.join(", ") || "(无)"}。\n请基于现有实现行为,产出符合规范的行为契约。`
+      : `## 场景上下文\n本功能在「${args.scenarioName}」场景下尚未落地,为待实现需求。`;
 
   const base = `以下是本次需求澄清的输入。
 
@@ -149,7 +152,7 @@ export async function GET(req: Request): Promise<Response> {
   const db = getDb();
   const runs = listRunsByKind(db, "require", 20);
 
-  let matchedRun: typeof runs[number] | undefined;
+  let matchedRun: (typeof runs)[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
 
   // P1.3: 聚合该 cell 的历史需求列表(供前端"历史需求"回填)。
@@ -167,7 +170,9 @@ export async function GET(req: Request): Promise<Response> {
       try {
         const p = JSON.parse(ev.payload);
         return p.type === "require-start" && p.cellId === cellId;
-      } catch { return false; }
+      } catch {
+        return false;
+      }
     });
     if (!startEvent) continue;
     // 第一个匹配仍作为 matchedRun(详细回放用),与原语义一致
@@ -180,8 +185,11 @@ export async function GET(req: Request): Promise<Response> {
     for (const ev of events) {
       try {
         const p = JSON.parse(ev.payload);
-        if (p.type === "require-input" && typeof p.userRequest === "string") userRequest = p.userRequest;
-      } catch { /* skip */ }
+        if (p.type === "require-input" && typeof p.userRequest === "string")
+          userRequest = p.userRequest;
+      } catch {
+        /* skip */
+      }
     }
     history.push({ runId: r.id, userRequest, state: r.state, startedAt: r.startedAt });
   }
@@ -197,8 +205,13 @@ export async function GET(req: Request): Promise<Response> {
   for (const ev of [...matchedEvents].reverse()) {
     try {
       const p = JSON.parse(ev.payload);
-      if (p.type === "done" || p.type === "contract-draft") { result = p as Record<string, unknown>; break; }
-    } catch { /* skip */ }
+      if (p.type === "done" || p.type === "contract-draft") {
+        result = p as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      /* skip */
+    }
   }
 
   return NextResponse.json({
@@ -258,7 +271,9 @@ export async function POST(req: Request): Promise<Response> {
   // 契约产物写到目标项目 .claude/contracts/(控制平面原则)
   const sandboxPath = await resolveSandboxPath();
   // HelmcodeManager 统一 skill/standards 加载 + 版本感知(第三刀)
-  const manager = helmcodeRoot ? new HelmcodeManager({ helmcodeRoot, preset: "java-ddd" }) : undefined;
+  const manager = helmcodeRoot
+    ? new HelmcodeManager({ helmcodeRoot, preset: "java-ddd" })
+    : undefined;
   const versionInfo = manager?.getVersion();
 
   let systemPrompt: string;
@@ -327,7 +342,16 @@ export async function POST(req: Request): Promise<Response> {
           iteration: number,
           reflection: string | null,
         ): Promise<{ ok: boolean; markdown: string; issues: Issue[] }> => {
-          const attempt = createAttempt(db, run.id, "require", iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
+          const attempt = createAttempt(
+            db,
+            run.id,
+            "require",
+            iteration,
+            "running",
+            versionInfo
+              ? { version: versionInfo.helmcode, checksum: versionInfo.checksum }
+              : undefined,
+          );
           const userPrompt = buildUserPrompt({
             feature,
             scenarioName,
@@ -351,25 +375,56 @@ export async function POST(req: Request): Promise<Response> {
                   collected.push(event.text);
                   sse({ type: "token", text: event.text });
                 } else if (event.type === "tool_use") {
-                  sse({ type: "tool_use", toolUseId: event.toolUseId, name: event.name, input: event.input });
+                  sse({
+                    type: "tool_use",
+                    toolUseId: event.toolUseId,
+                    name: event.name,
+                    input: event.input,
+                  });
                 } else if (event.type === "tool_result") {
-                  sse({ type: "tool_result", toolUseId: event.toolUseId, isError: event.isError, preview: event.preview });
+                  sse({
+                    type: "tool_result",
+                    toolUseId: event.toolUseId,
+                    isError: event.isError,
+                    preview: event.preview,
+                  });
                 } else if (event.type === "system.init") {
-                  sse({ type: "system-init", sessionId: event.sessionId, cwd: event.cwd, model: event.model });
+                  sse({
+                    type: "system-init",
+                    sessionId: event.sessionId,
+                    cwd: event.cwd,
+                    model: event.model,
+                  });
                 } else if (event.type === "result") {
-                  sse({ type: "result-cost", success: event.success, turns: event.turns, durationMs: event.durationMs, costUsd: event.costUsd ?? null });
+                  sse({
+                    type: "result-cost",
+                    success: event.success,
+                    turns: event.turns,
+                    durationMs: event.durationMs,
+                    costUsd: event.costUsd ?? null,
+                  });
                 }
               },
             });
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             updateAttempt(db, attempt.id, { status: "failed" });
-            return { ok: false, markdown: collected.join(""), issues: [{ check: "agent-runner-exception", detail: message }] };
+            return {
+              ok: false,
+              markdown: collected.join(""),
+              issues: [{ check: "agent-runner-exception", detail: message }],
+            };
           }
 
           if (!nodeResult.success) {
             updateAttempt(db, attempt.id, { status: "failed" });
-            return { ok: false, markdown: collected.join(""), issues: [{ check: "agent-runner-failed", detail: nodeResult.error ?? "agent run failed" }] };
+            return {
+              ok: false,
+              markdown: collected.join(""),
+              issues: [
+                { check: "agent-runner-failed", detail: nodeResult.error ?? "agent run failed" },
+              ],
+            };
           }
 
           const modelMarkdown = collected.join("");
@@ -384,7 +439,11 @@ export async function POST(req: Request): Promise<Response> {
           const parsed = parseContract(markdown);
           if (!parsed.ok) {
             updateAttempt(db, attempt.id, { status: "failed" });
-            return { ok: false, markdown, issues: parsed.errors.map((e) => ({ check: "contract-parse", detail: e })) };
+            return {
+              ok: false,
+              markdown,
+              issues: parsed.errors.map((e) => ({ check: "contract-parse", detail: e })),
+            };
           }
           const critic = runClarifierCritic(parsed.data);
           if (!critic.pass) {
@@ -418,7 +477,10 @@ export async function POST(req: Request): Promise<Response> {
             const reflection = round === 1 ? null : buildReflection(lastIssues);
             const outcome = await runOneAttempt(round, reflection);
             lastMarkdown = outcome.markdown;
-            if (outcome.ok) { success = true; break; }
+            if (outcome.ok) {
+              success = true;
+              break;
+            }
             lastIssues = outcome.issues;
             sse({ type: "critic-fail", round, issues: outcome.issues });
           }
@@ -430,7 +492,8 @@ export async function POST(req: Request): Promise<Response> {
               const inventory = scanJavaInventory(sandboxPath);
               const layerResult = await runClassify({
                 cwd: sandboxPath,
-                systemPrompt: "你是 DDD 分层架构分析师。基于需求契约和项目代码结构,推断该功能应该落在哪个 Decider/Acceptor/Handler/Action。输出 JSON。",
+                systemPrompt:
+                  "你是 DDD 分层架构分析师。基于需求契约和项目代码结构,推断该功能应该落在哪个 Decider/Acceptor/Handler/Action。输出 JSON。",
                 userPrompt: buildLayerAnalysisPrompt(feature, inventory),
               });
               const layerImpl = parseLayerAnalysisResult(layerResult.text);
@@ -445,7 +508,10 @@ export async function POST(req: Request): Promise<Response> {
               }
             } catch (layerErr) {
               // 分层分析失败不阻塞契约产出
-              sse({ type: "layer-analysis-skipped", reason: layerErr instanceof Error ? layerErr.message : "unknown" });
+              sse({
+                type: "layer-analysis-skipped",
+                reason: layerErr instanceof Error ? layerErr.message : "unknown",
+              });
             }
 
             updateRun(db, run.id, "done");
@@ -468,19 +534,30 @@ export async function POST(req: Request): Promise<Response> {
                   projectId,
                   originPath: written.absPath,
                 });
-              } catch { /* ignore */ }
+              } catch {
+                /* ignore */
+              }
             }
             updateCellAgentStatus(db, cellId, "blocked");
             sse({ type: "done", runId: run.id, status: "blocked", issues: lastIssues });
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          try { updateRun(db, run.id, "failed"); updateCellAgentStatus(db, cellId, "blocked"); } catch { /* ignore */ }
+          try {
+            updateRun(db, run.id, "failed");
+            updateCellAgentStatus(db, cellId, "blocked");
+          } catch {
+            /* ignore */
+          }
           sse({ type: "error", message });
         }
       } finally {
         stopHb();
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
     cancel() {
@@ -494,7 +571,10 @@ export async function POST(req: Request): Promise<Response> {
 // 分层分析(契约产出后,推断该需求在 DDD 四层的归属)
 // ---------------------------------------------------------------------------
 
-function buildLayerAnalysisPrompt(feature: Feature, inventory: ReturnType<typeof scanJavaInventory>): string {
+function buildLayerAnalysisPrompt(
+  feature: Feature,
+  inventory: ReturnType<typeof scanJavaInventory>,
+): string {
   // 按 type 分组,只给 handler/action/decider/acceptor(不给 other 噪音)
   const byType = {
     decider: inventory.filter((i) => i.type === "decider").map((i) => i.className),
@@ -531,7 +611,9 @@ function buildLayerAnalysisPrompt(feature: Feature, inventory: ReturnType<typeof
 无匹配时字段留空字符串。`;
 }
 
-function parseLayerAnalysisResult(text: string): { decider?: string; acceptor?: string; handler?: string; actions?: string[] } | null {
+function parseLayerAnalysisResult(
+  text: string,
+): { decider?: string; acceptor?: string; handler?: string; actions?: string[] } | null {
   const match = text.match(/<LAYER_RESULT>([\s\S]*?)<\/LAYER_RESULT>/);
   if (!match?.[1]) return null;
   try {
@@ -544,7 +626,9 @@ function parseLayerAnalysisResult(text: string): { decider?: string; acceptor?: 
       decider: typeof parsed.decider === "string" ? parsed.decider : undefined,
       acceptor: typeof parsed.acceptor === "string" ? parsed.acceptor : undefined,
       handler: typeof parsed.handler === "string" ? parsed.handler : undefined,
-      actions: Array.isArray(parsed.actions) ? parsed.actions.filter((a: unknown) => typeof a === "string") : undefined,
+      actions: Array.isArray(parsed.actions)
+        ? parsed.actions.filter((a: unknown) => typeof a === "string")
+        : undefined,
     };
   } catch {
     return null;
