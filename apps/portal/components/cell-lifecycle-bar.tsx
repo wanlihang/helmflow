@@ -5,18 +5,18 @@ interface CellLifecycleBarProps {
   hasContract: boolean;
 }
 
-// 4 节点 Pipeline: require → code → test → deploy
-type Stage = "require" | "approve" | "code" | "test" | "deploy";
+// 4 节点 Pipeline: clarify → code → test → deploy
+type Stage = "clarify" | "approve" | "code" | "test" | "deploy";
 
 const STAGES: { id: Stage; label: string; color: string }[] = [
-  { id: "require", label: "需求", color: "blue" },
+  { id: "clarify", label: "需求", color: "blue" },
   { id: "approve", label: "审批", color: "indigo" },
   { id: "code", label: "代码", color: "purple" },
   { id: "test", label: "测试", color: "amber" },
   { id: "deploy", label: "上线", color: "green" },
 ];
 
-const STAGE_ORDER: Stage[] = ["require", "approve", "code", "test", "deploy"];
+const STAGE_ORDER: Stage[] = ["clarify", "approve", "code", "test", "deploy"];
 
 /**
  * 推断当前所在阶段。
@@ -40,8 +40,8 @@ function inferCurrentStage(
   switch (agentStatus) {
     case "blocked":
       if (contractStatus === "approved") return "code";
-      if (hasContract) return "require";
-      return "require";
+      if (hasContract) return "clarify";
+      return "clarify";
     case "clarifying":
     case "pending-goal":
       return "approve";
@@ -57,11 +57,11 @@ function inferCurrentStage(
   // not-started: 看有没有契约
   if (hasContract) {
     if (contractStatus === "approved") return "approve";
-    if (contractStatus === "draft") return "require";
-    return "require";
+    if (contractStatus === "draft") return "clarify";
+    return "clarify";
   }
 
-  return "require";
+  return "clarify";
 }
 
 function getStageState(

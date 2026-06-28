@@ -1,6 +1,7 @@
 "use client";
 
 import { ConversationView } from "@/components/conversation-view";
+import { PendingMergePanel } from "@/components/pending-merge-panel";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -32,7 +33,7 @@ type SseEvent =
     }
   | { type: "fix-task-created"; fixTaskId: string; failedAcId: string; routeTo: string }
   | { type: "reflection-created"; reflectionId: string; nodeName: string }
-  | { type: "loop-iteration"; loop: number; maxLoops: number; routeTo: string }
+  | { type: "loop-iteration"; loop: number; maxLoops: number; routeTo: string; infraRetry?: boolean; infraBackoffMs?: number }
   | { type: "escalate"; reason: string; loop: number }
   | { type: "worktree-merge"; success: boolean; error?: string }
   | { type: "worktree-retained"; worktreePath: string; reason: string }
@@ -69,6 +70,7 @@ interface RunApiResponse {
       runId?: string;
       turns?: number;
       durationMs?: number;
+      costUsd?: number | null;
     }
   >;
   isActive: boolean;
@@ -82,13 +84,13 @@ interface RunApiResponse {
 }
 
 const NODE_LABELS: Record<string, string> = {
-  coder: "Coder",
-  testgen: "TestGen",
-  qa: "QA",
-  committer: "Committer",
+  clarify: "需求澄清",
+  code: "代码实现",
+  test: "测试验证",
+  deploy: "上线部署",
 };
 
-const NODE_ORDER = ["coder", "testgen", "qa", "committer"];
+const NODE_ORDER = ["clarify", "code", "test", "deploy"];
 
 const statusColors: Record<string, string> = {
   pending: "bg-gray-200 text-gray-600",
@@ -183,6 +185,11 @@ export default function RunPage({ params }: RunPageProps) {
     totalDurationMs: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // M8: Plan(clarify)run 完成后,从 contract-draft 事件取 markdownPath,展示契约产物入口。
+  const [contractDraft, setContractDraft] = useState<{
+    contractId?: string;
+    markdownPath?: string;
+  } | null>(null);
   const [sseStatus, setSseStatus] = useState<
     "connecting" | "streaming" | "done" | "offline" | "reconnecting"
   >("connecting");
@@ -280,11 +287,19 @@ export default function RunPage({ params }: RunPageProps) {
           );
           break;
         case "loop-iteration": {
-          addLog(
-            "warn",
-            `Loop ${ev.loop}/${ev.maxLoops} — retrying from ${ev.routeTo}`,
-            `li:${ev.loop}:${ev.routeTo}`,
-          );
+          if (ev.infraRetry) {
+            addLog(
+              "warn",
+              `⏳ 端点限流/网络 → infra 退避 ${Math.round((ev.infraBackoffMs ?? 0) / 1000)}s 后原地重试 ${ev.routeTo}(独立计数,不耗业务重试)`,
+              `li:infra:${ev.loop}:${ev.routeTo}`,
+            );
+          } else {
+            addLog(
+              "warn",
+              `Loop ${ev.loop}/${ev.maxLoops} — retrying from ${ev.routeTo}`,
+              `li:${ev.loop}:${ev.routeTo}`,
+            );
+          }
           const routeIdx = NODE_ORDER.indexOf(ev.routeTo);
           if (routeIdx >= 0) {
             setNodes((prev) => {
@@ -368,6 +383,9 @@ export default function RunPage({ params }: RunPageProps) {
             status: ns?.status ?? "pending",
             iteration: ns?.iteration ?? 0,
             runId: ns?.runId,
+            turns: ns?.turns,
+            durationMs: ns?.durationMs,
+            costUsd: ns?.costUsd,
           };
         }
         setNodes((prev) => {
@@ -380,6 +398,10 @@ export default function RunPage({ params }: RunPageProps) {
               status: fromDb.status !== "pending" ? fromDb.status : fromSse.status,
               iteration: Math.max(fromDb.iteration, fromSse.iteration),
               runId: fromDb.runId ?? fromSse.runId,
+              // DB 是已完成节点的权威来源(跨进程/断线恢复);DB 无值时回落 SSE
+              turns: fromDb.turns ?? fromSse.turns,
+              durationMs: fromDb.durationMs ?? fromSse.durationMs,
+              costUsd: fromDb.costUsd ?? fromSse.costUsd,
             };
           }
           return merged;
@@ -418,6 +440,17 @@ export default function RunPage({ params }: RunPageProps) {
           if (typeof p.contractId === "string") setContractId(p.contractId);
           addLog("info", `Orchestrator started · feature=${p.featureId ?? "?"}`);
           break;
+        case "contract-draft":
+          // M8: Plan 产物 — 记下 markdownPath,用于契约产物区入口。
+          setContractDraft({
+            contractId: typeof p.contractId === "string" ? p.contractId : undefined,
+            markdownPath: typeof p.markdownPath === "string" ? p.markdownPath : undefined,
+          });
+          addLog(
+            "success",
+            `契约草稿已产出${typeof p.contractId === "string" ? ` · ${p.contractId}` : ""}`,
+          );
+          break;
         case "worktree-created":
           addLog("info", `Worktree: ${p.branchName ?? "?"}`);
           break;
@@ -440,7 +473,11 @@ export default function RunPage({ params }: RunPageProps) {
           addLog("info", `Reflection saved for ${p.nodeName ?? "?"}`);
           break;
         case "loop-iteration":
-          addLog("warn", `Loop ${p.loop ?? "?"}/${p.maxLoops ?? "?"} → ${p.routeTo ?? "?"}`);
+          if (p.infraRetry) {
+            addLog("warn", `⏳ infra 退避 ${Math.round((Number(p.infraBackoffMs ?? 0)) / 1000)}s 后重试 ${p.routeTo ?? "?"}`);
+          } else {
+            addLog("warn", `Loop ${p.loop ?? "?"}/${p.maxLoops ?? "?"} → ${p.routeTo ?? "?"}`);
+          }
           break;
         case "escalate":
           addLog("error", `Escalated: ${p.reason ?? "?"}`);
@@ -493,11 +530,13 @@ export default function RunPage({ params }: RunPageProps) {
   // sees the latest value without re-creating the interval.
   const sseStatusRef = useRef(sseStatus);
   sseStatusRef.current = sseStatus;
+  // 仅在 done 状态翻转时才重新订阅(避免 streaming/reconnecting 等中间态频繁重连)
+  const isDone = sseStatus === "done";
 
   // ---- SSE subscription with auto-reconnect ----
   useEffect(() => {
     if (!runId) return;
-    if (sseStatus === "done") return;
+    if (isDone) return;
 
     const controller = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -580,9 +619,11 @@ export default function RunPage({ params }: RunPageProps) {
       if (retryTimer) clearTimeout(retryTimer);
       controller.abort();
     };
-  }, [runId, sseStatus === "done", handleSseEvent, addLog]);
+  }, [runId, isDone, handleSseEvent, addLog]);
 
   // ---- Auto-scroll logs ----
+  // 依赖 logs 仅用于在日志变化时触发滚动到底部(函数体内不读取 logs)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 故意以 logs 为触发器
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
@@ -591,17 +632,21 @@ export default function RunPage({ params }: RunPageProps) {
   const totalTurns = Object.values(nodes).reduce((sum, n) => sum + (n.turns ?? 0), 0);
 
   const statusText =
-    sseStatus === "streaming"
-      ? "streaming..."
-      : sseStatus === "done"
-        ? final?.success
-          ? "done"
-          : "blocked"
-        : sseStatus === "reconnecting"
-          ? "reconnecting..."
-          : sseStatus === "offline"
-            ? "offline (syncing via DB)"
-            : "connecting...";
+    runState === "pending-confirm"
+      ? "待确认合并"
+      : runState === "abandoned"
+        ? "已放弃"
+        : sseStatus === "streaming"
+          ? "streaming..."
+          : sseStatus === "done"
+            ? final?.success
+              ? "done"
+              : "blocked"
+            : sseStatus === "reconnecting"
+              ? "reconnecting..."
+              : sseStatus === "offline"
+                ? "offline (syncing via DB)"
+                : "connecting...";
 
   return (
     <div className="space-y-6">
@@ -629,12 +674,39 @@ export default function RunPage({ params }: RunPageProps) {
       </nav>
 
       <header className="space-y-2 border-b border-border pb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* M8: Plan/Act 徽标 */}
+          {runKind && (
+            <span
+              className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${
+                runKind === "clarify"
+                  ? "bg-blue-100 text-blue-700 border border-blue-200"
+                  : "bg-purple-100 text-purple-700 border border-purple-200"
+              }`}
+            >
+              {runKind === "clarify" ? "Plan · 需求澄清" : "Act · 执行"}
+            </span>
+          )}
+          {/* M8: 常驻返回详情页入口(不依赖 run 是否结束) */}
+          {featureId && (
+            <Link
+              href={
+                featureId.includes("__")
+                  ? `/features/${featureId.split("__")[0]}/${encodeURIComponent(featureId.split("__")[1])}`
+                  : `/features/${featureId}`
+              }
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              ← 返回详情页
+            </Link>
+          )}
+        </div>
         <h1 className="text-2xl font-bold tracking-tight">
           {runKind === "full-loop"
             ? "Full-Loop Run"
             : runKind === "analyze" || runKind === "analyze-scan"
               ? "状态分析"
-              : runKind === "require"
+              : runKind === "clarify"
                 ? "需求澄清"
                 : runKind === "code"
                   ? "代码实现"
@@ -716,6 +788,38 @@ export default function RunPage({ params }: RunPageProps) {
       {sseStatus === "offline" && !final && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700">
           Orchestrator 正在后台运行中。通过数据库持续同步最新状态，无需手动刷新。
+        </div>
+      )}
+
+      {/* M8: 契约产物区(Plan/clarify 专属)。
+          contract-draft 事件到达后展示入口;最小版跳详情页契约区查看/审批。 */}
+      {contractDraft && featureId && (
+        <section className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 space-y-2">
+          <div className="font-semibold">契约已产出</div>
+          <div className="text-xs font-mono text-blue-700">
+            {contractDraft.contractId ? `contract=${contractDraft.contractId}` : "契约草稿已落库"}
+          </div>
+          <Link
+            href={
+              featureId.includes("__")
+                ? `/features/${featureId.split("__")[0]}/${encodeURIComponent(featureId.split("__")[1])}`
+                : `/features/${featureId}`
+            }
+            className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+          >
+            查看契约 →
+          </Link>
+        </section>
+      )}
+
+      {runState === "pending-confirm" && <PendingMergePanel runId={runId} />}
+
+      {runState === "abandoned" && (
+        <div className="rounded-md border border-zinc-300 bg-zinc-100 p-4 text-sm text-zinc-700">
+          <div className="font-semibold text-base">已放弃合并</div>
+          <div className="mt-1 text-xs">
+            本次 worktree 分支已删除,run 标记为已放弃。可重新发起需求/全流程。
+          </div>
         </div>
       )}
 

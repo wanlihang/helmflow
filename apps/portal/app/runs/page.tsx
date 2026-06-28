@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { QueuePanel } from "@/components/queue-panel";
 import { RunsPanel } from "@/components/runs-panel";
 import { getDb } from "@/lib/db";
@@ -37,6 +38,10 @@ export default async function RunsPage() {
 
   return (
     <div className="space-y-8">
+      <PageHeader
+        title="运行中心"
+        description="队列调度与最近运行。卡死的 run 入口自动清理(基于最后活动 5min)。"
+      />
       <QueuePanel />
       <RunsPanel initialRuns={initial} />
     </div>

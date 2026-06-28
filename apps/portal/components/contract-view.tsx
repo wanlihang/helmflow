@@ -6,7 +6,6 @@ import { useState } from "react";
 
 interface ContractViewProps {
   contract: Contract;
-  rawMarkdown: string;
 }
 
 function Collapsible({
@@ -34,7 +33,7 @@ function Collapsible({
   );
 }
 
-export function ContractView({ contract, rawMarkdown }: ContractViewProps) {
+export function ContractView({ contract }: ContractViewProps) {
   return (
     <div className="space-y-3">
       {/* Acceptance Criteria — 核心：怎么判断需求完成 */}
@@ -92,8 +91,8 @@ export function ContractView({ contract, rawMarkdown }: ContractViewProps) {
                 </tr>
               </thead>
               <tbody>
-                {contract.apiContract.map((api, i) => (
-                  <tr key={i} className="border-b border-border">
+                {contract.apiContract.map((api) => (
+                  <tr key={`${api.method}-${api.request}`} className="border-b border-border">
                     <td className="px-2 py-1 font-mono">{api.method}</td>
                     <td className="px-2 py-1 font-mono text-muted-foreground">{api.request}</td>
                     <td className="px-2 py-1 font-mono text-muted-foreground">{api.response}</td>
@@ -124,64 +123,35 @@ export function ContractView({ contract, rawMarkdown }: ContractViewProps) {
             {contract.domainModel}
           </pre>
         </Collapsible>
-
-        <Collapsible title="原始 Markdown" defaultOpen={false}>
-          <pre className="text-[10px] leading-relaxed whitespace-pre-wrap bg-muted rounded p-2 overflow-auto max-h-96">
-            {rawMarkdown}
-          </pre>
-        </Collapsible>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 兜底视图:结构化解析失败时,展示元信息卡片 + 原始 markdown。
-// 服务于 HelmCode 导入契约(无英文章节)和老英文契约。
+// 兜底视图:结构化解析失败时(HelmCode 导入契约/老英文契约),展示 md 解析的元信息。
+// 注:status 不在此显示——治理状态以标题栏的 DB contract.row.status 为准,避免双源冲突。
 // ---------------------------------------------------------------------------
 
-const HC_STATUS_BADGE: Record<string, string> = {
-  done: "bg-green-100 text-green-700",
-  approved: "bg-green-100 text-green-700",
-  "goal-running": "bg-blue-100 text-blue-700",
-  draft: "bg-gray-100 text-gray-600",
-};
-
-export function ContractFallbackView({
-  meta,
-  rawMarkdown,
-}: { meta: HelmcodeContractMeta; rawMarkdown: string }) {
+export function ContractFallbackView({ meta }: { meta: HelmcodeContractMeta }) {
   return (
-    <div className="space-y-3">
-      <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono font-semibold">{meta.featureId}</span>
-          <span
-            className={`inline-flex items-center rounded-md px-2 py-0.5 font-semibold ${HC_STATUS_BADGE[meta.status] ?? "bg-gray-100 text-gray-600"}`}
-          >
-            {meta.status}
+    <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
+      <div className="text-[10px] text-muted-foreground">
+        契约文件元信息 · featureId/领域/AC·BR 来自 HelmCode 契约(与标题栏的 portal 记录不同源)
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono font-semibold" title="契约文件中的 featureId">
+          {meta.featureId}
+        </span>
+        {meta.domain && (
+          <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
+            领域: {meta.domain}
           </span>
-          {meta.domain && (
-            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-blue-700">
-              领域: {meta.domain}
-            </span>
-          )}
-        </div>
-        <div className="text-muted-foreground">
-          AC {meta.acCount} 条 · BR {meta.brCount} 条{meta.hasDomainModel ? " · 含领域模型" : ""}
-        </div>
+        )}
       </div>
-      <ContractRawView rawMarkdown={rawMarkdown} />
+      <div className="text-muted-foreground">
+        AC {meta.acCount} 条 · BR {meta.brCount} 条{meta.hasDomainModel ? " · 含领域模型" : ""}
+      </div>
     </div>
-  );
-}
-
-export function ContractRawView({ rawMarkdown }: { rawMarkdown: string }) {
-  return (
-    <Collapsible title="原始 Markdown" defaultOpen={false}>
-      <pre className="text-[10px] leading-relaxed whitespace-pre-wrap bg-muted rounded p-2 overflow-auto max-h-96">
-        {rawMarkdown}
-      </pre>
-    </Collapsible>
   );
 }

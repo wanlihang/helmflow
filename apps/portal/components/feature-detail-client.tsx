@@ -18,12 +18,6 @@ interface FeaturePageData {
   recentActivities: ActivityItem[];
 }
 
-const priorityClasses: Record<string, string> = {
-  P0: "bg-red-100 text-red-700 border border-red-200",
-  P1: "bg-yellow-100 text-yellow-700 border border-yellow-200",
-  P2: "bg-gray-100 text-gray-700 border border-gray-200",
-};
-
 const AGENT_STATUS_LABEL: Record<FeatureStatus, string> = {
   "not-started": "未启动",
   clarifying: "澄清中",
@@ -49,14 +43,19 @@ const ACTIVITY_STATE_BADGE: Record<string, string> = {
   done: "bg-green-100 text-green-700",
   applied: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
+  "pending-confirm": "bg-amber-100 text-amber-800",
+  abandoned: "bg-zinc-200 text-zinc-600",
 };
 
 const KIND_LABEL: Record<string, string> = {
-  require: "需求澄清",
+  clarify: "需求澄清",
   code: "代码实现",
   test: "测试",
   deploy: "上线",
+  "full-loop": "全流程",
   analyze: "状态分析",
+  "analyze-scan": "扫码分析",
+  "analyze-structure": "结构识别",
   "contract-sync": "契约同步",
   verify: "验证",
 };
@@ -128,13 +127,13 @@ export function FeaturePageClient({ data }: { data: FeaturePageData }) {
             归档
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${priorityClasses[feature.priority] ?? priorityClasses.P2}`}
-          >
-            {feature.priority}
-          </span>
-        </div>
+        {feature.description ? (
+          <p className="whitespace-pre-wrap text-sm text-muted-foreground">{feature.description}</p>
+        ) : (
+          <p className="text-xs italic text-muted-foreground">
+            未填写描述 · 点「编辑」补充功能点的大致描述
+          </p>
+        )}
       </header>
 
       {/* 分层架构归属(分析产出:Decider/Acceptor/Handler/Action) */}

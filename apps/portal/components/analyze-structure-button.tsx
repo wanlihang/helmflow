@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { formatToolEvent, useAnalyzeLog } from "@/lib/analyze-utils";
 import { extractSseData, parseSseChunk } from "@/lib/sse-parse";
 import type { StructureAnalysisResult } from "@/lib/structure-analyzer";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 interface AnalyzeStructureButtonProps {
@@ -19,7 +18,6 @@ interface StructureGetResponse {
 }
 
 export function AnalyzeStructureButton({ projectId }: AnalyzeStructureButtonProps) {
-  const router = useRouter();
   const [analyzing, setAnalyzing] = useState(false);
   const [structureResult, setStructureResult] = useState<StructureAnalysisResult | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -55,10 +53,10 @@ export function AnalyzeStructureButton({ projectId }: AnalyzeStructureButtonProp
           }
         }
 
-        // 已完成且有结果 → 恢复结果并弹出审阅对话框
+        // 已完成且有结果 → 恢复结果,但不自动弹窗(改为徽标提示,用户主动点开;
+        // 仅本次 SSE 刚跑完时由 handleSseEvent 自动弹一次)。
         if (data.run.state === "done" && data.result) {
           setStructureResult(data.result);
-          setTimeout(() => setReviewOpen(true), 300);
         }
       } catch {
         // 首次加载失败不致命
@@ -233,15 +231,25 @@ export function AnalyzeStructureButton({ projectId }: AnalyzeStructureButtonProp
         </div>
       )}
 
+      {/* 待审阅徽标:有结果但弹窗未打开时显示,点击重新打开审阅 */}
+      {structureResult && !reviewOpen && (
+        <div className="mt-2 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+          <span>📋 上次识别的结构待审阅</span>
+          <button
+            type="button"
+            className="rounded bg-blue-600 px-2 py-0.5 font-semibold text-white hover:bg-blue-700"
+            onClick={() => setReviewOpen(true)}
+          >
+            立即审阅
+          </button>
+        </div>
+      )}
+
       {structureResult && (
         <StructureReviewDialog
           open={reviewOpen}
-          onOpenChange={(open) => {
-            setReviewOpen(open);
-            if (!open) {
-              router.refresh();
-            }
-          }}
+          onOpenChange={setReviewOpen}
+          onApplied={() => setStructureResult(null)}
           result={structureResult}
           projectId={projectId}
           runId={runId ?? undefined}

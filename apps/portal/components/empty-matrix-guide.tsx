@@ -56,10 +56,9 @@ export function EmptyMatrixGuide({ projectId }: EmptyMatrixGuideProps) {
           setResumedRunning(true);
           appendLog("⚠️ 检测到上次分析仍在进行中，可等待或点击按钮重新分析");
         } else if (data.run.state === "done" && data.result) {
-          // 已完成且有结果 → 恢复结果并弹出审阅对话框
+          // 已完成且有结果 → 恢复结果,但不自动弹窗(改为提示,用户主动点开)
           setStructureResult(data.result);
           setRunId(data.run.id);
-          setTimeout(() => setReviewOpen(true), 300);
         } else if (data.run.state === "applied") {
           // 已应用的分析结果，不弹窗
         } else if (data.run.state === "failed") {
@@ -257,14 +256,26 @@ export function EmptyMatrixGuide({ projectId }: EmptyMatrixGuideProps) {
         projectId={projectId}
       />
 
+      {/* 待审阅提示:有结果但弹窗未打开时显示,点击打开审阅 */}
+      {structureResult && !reviewOpen && (
+        <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+          <span>📋 上次识别的结构待审阅</span>
+          <button
+            type="button"
+            className="rounded bg-blue-600 px-2 py-0.5 font-semibold text-white hover:bg-blue-700"
+            onClick={() => setReviewOpen(true)}
+          >
+            立即审阅
+          </button>
+        </div>
+      )}
+
       {/* 结构分析审阅 */}
       {structureResult && (
         <StructureReviewDialog
           open={reviewOpen}
-          onOpenChange={(open) => {
-            setReviewOpen(open);
-            if (!open) router.refresh();
-          }}
+          onOpenChange={setReviewOpen}
+          onApplied={() => setStructureResult(null)}
           result={structureResult}
           projectId={projectId}
           runId={runId ?? undefined}

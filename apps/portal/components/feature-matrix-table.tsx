@@ -1,8 +1,9 @@
 "use client";
 
 import { AddFeatureDialog } from "@/components/add-feature-dialog";
+import { EditFeatureDialog } from "@/components/edit-feature-dialog";
 import { Badge } from "@/components/ui/badge";
-import type { Domain, FeatureStatus, Scenario, ScenarioStatus } from "@/lib/matrix";
+import type { Domain, Feature, FeatureStatus, Scenario, ScenarioStatus } from "@/lib/matrix";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -30,6 +31,32 @@ function getFusedBadge(
 export function FeatureMatrixTable({ domain, scenarioNames, projectId }: FeatureMatrixTableProps) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [editFeature, setEditFeature] = useState<Feature | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete(feature: Feature): Promise<void> {
+    setMenuOpenId(null);
+    if (
+      !window.confirm(
+        `确认删除功能「${feature.name}」(${feature.id})？\n删除后首页不再显示(软删除,保留历史运行记录)。`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/features/${feature.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json();
+        alert(d.error ?? "删除失败");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <section className="space-y-3">
@@ -55,6 +82,7 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
             {scenarioNames.map((name) => (
               <col key={name} />
             ))}
+            <col className="w-12" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-muted/50">
@@ -65,6 +93,7 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
                   {name}
                 </th>
               ))}
+              <th className="whitespace-nowrap px-2 py-2 text-center font-semibold"> </th>
             </tr>
           </thead>
           <tbody>
@@ -116,6 +145,48 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
                     </td>
                   );
                 })}
+                {/* 行操作 ⋯ 菜单(编辑 / 删除) */}
+                <td className="relative px-2 py-2 text-center">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    className="rounded px-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    onClick={() => setMenuOpenId((cur) => (cur === feature.id ? null : feature.id))}
+                  >
+                    ⋯
+                  </button>
+                  {menuOpenId === feature.id && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        aria-hidden
+                        onClick={() => setMenuOpenId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setMenuOpenId(null);
+                        }}
+                      />
+                      <div className="absolute right-2 top-full z-50 mt-1 w-24 rounded-md border border-border bg-card py-1 text-xs shadow-lg">
+                        <button
+                          type="button"
+                          className="block w-full px-3 py-1.5 text-left hover:bg-muted"
+                          onClick={() => {
+                            setMenuOpenId(null);
+                            setEditFeature(feature);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-muted"
+                          onClick={() => handleDelete(feature)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -128,6 +199,17 @@ export function FeatureMatrixTable({ domain, scenarioNames, projectId }: Feature
         defaultDomain={domain.id}
         projectId={projectId}
       />
+
+      {/* 行内编辑(与详情页共用 EditFeatureDialog) */}
+      {editFeature && (
+        <EditFeatureDialog
+          open={true}
+          onOpenChange={(next) => {
+            if (!next) setEditFeature(null);
+          }}
+          feature={editFeature}
+        />
+      )}
     </section>
   );
 }

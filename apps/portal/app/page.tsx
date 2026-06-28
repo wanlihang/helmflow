@@ -1,7 +1,6 @@
-import { AnalyzeAllButton } from "@/components/analyze-all-button";
-import { AnalyzeStructureButton } from "@/components/analyze-structure-button";
 import { EmptyMatrixGuide } from "@/components/empty-matrix-guide";
 import { FeatureMatrixTable } from "@/components/feature-matrix-table";
+import { MatrixMoreActions } from "@/components/matrix-more-actions";
 import { getAllScenarioNames, getTotalFeatureCount, loadMatrix } from "@/lib/matrix";
 import { getCurrentProjectId } from "@/lib/project";
 
@@ -59,7 +58,7 @@ export default async function HomePage() {
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight">
+                <h1 className="text-2xl font-bold tracking-tight">
                   <span className="font-mono">{matrix.project}</span>
                 </h1>
                 <p className="mt-1 text-sm text-muted-foreground font-mono">
@@ -72,10 +71,7 @@ export default async function HomePage() {
                   </span>
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <AnalyzeStructureButton projectId={projectId} />
-                <AnalyzeAllButton />
-              </div>
+              <MatrixMoreActions projectId={projectId} />
             </div>
 
             <div className="rounded-md border border-border bg-muted/40 p-3">

@@ -14,7 +14,7 @@ interface RunItem {
 }
 
 const KIND_LABEL: Record<string, string> = {
-  require: "需求澄清",
+  clarify: "需求澄清",
   code: "代码实现",
   test: "测试",
   deploy: "上线",
@@ -34,6 +34,8 @@ const STATE_STYLE: Record<string, string> = {
   done: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
   applied: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
   failed: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
+  "pending-confirm": "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+  abandoned: "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
 };
 import { timeAgo } from "@/lib/format";
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { ContractRenderDialog } from "@/components/contract-render-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
@@ -83,6 +84,9 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
   const [pendingPick, setPendingPick] = useState<
     Record<string, { featureId: string; scenarioName: string }>
   >({});
+  // 「查看契约」弹窗:当前查看的契约正文 + 正在加载的 contractFeatureId
+  const [viewContract, setViewContract] = useState<string | null>(null);
+  const [loadingContract, setLoadingContract] = useState<string | null>(null);
 
   const handleScan = async () => {
     setScanning(true);
@@ -167,6 +171,23 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
     }
   };
 
+  const handleView = async (featureId: string) => {
+    setLoadingContract(featureId);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/contract-sync/contract?featureId=${encodeURIComponent(featureId)}`,
+      );
+      const data = (await res.json()) as { markdown?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setViewContract(data.markdown ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingContract(null);
+    }
+  };
+
   const renderRow = (r: SyncResult, actionable: boolean) => (
     <div key={r.id} className="rounded-md border border-border bg-card p-3 text-sm space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -188,6 +209,14 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
         <span className="text-xs text-muted-foreground">
           置信度 {(r.confidence * 100).toFixed(0)}%
         </span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={loadingContract === r.contractFeatureId}
+          onClick={() => handleView(r.contractFeatureId)}
+        >
+          {loadingContract === r.contractFeatureId ? "加载中…" : "查看契约"}
+        </Button>
       </div>
 
       {r.state === "matched" && r.mappedFeatureId && (
@@ -200,7 +229,7 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
       {actionable && (r.state === "pending" || r.state === "unmatched") && (
         <div className="space-y-2 border-t border-border pt-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <label className="text-muted-foreground">指认功能点:</label>
+            <span className="text-muted-foreground">指认功能点:</span>
             <select
               className="rounded border border-border bg-background px-2 py-1 text-xs"
               defaultValue=""
@@ -342,6 +371,16 @@ export function ContractSyncPanel({ projectId, features, lastScannedAt }: PanelP
           </p>
           <div className="grid gap-2">{unmatched.map((r) => renderRow(r, true))}</div>
         </section>
+      )}
+
+      {viewContract !== null && (
+        <ContractRenderDialog
+          rawMarkdown={viewContract}
+          open={true}
+          onOpenChange={(o) => {
+            if (!o) setViewContract(null);
+          }}
+        />
       )}
     </div>
   );

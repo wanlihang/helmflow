@@ -322,12 +322,39 @@ export function AnalyzeAllButton() {
                   className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-xs"
                 >
                   <div className="flex-1">
-                    <div className="font-mono font-semibold">{r.cellId}</div>
+                    <div className="font-mono font-semibold">
+                      {r.cellId}
+                      {r.deterministic ? (
+                        <span className="ml-2 rounded bg-green-100 px-1 text-[10px] font-normal text-green-700">
+                          确定性
+                        </span>
+                      ) : (
+                        <span className="ml-2 rounded bg-purple-100 px-1 text-[10px] font-normal text-purple-700">
+                          契约验证
+                        </span>
+                      )}
+                    </div>
                     <div className="text-muted-foreground">
                       {r.oldStatus} →{" "}
                       <span className="font-semibold text-foreground">{r.newStatus}</span>
                     </div>
                     <div className="text-muted-foreground">{r.reason}</div>
+                    {r.contractCheck && (
+                      <div className="mt-1 space-y-0.5 text-[10px]">
+                        {r.contractCheck.rules.map((br) => (
+                          <div key={br.id}>
+                            {br.landed ? "✅" : "❌"} {br.id}
+                            {br.note ? ` ${br.note}` : ""}
+                          </div>
+                        ))}
+                        {r.contractCheck.criteria.map((ac) => (
+                          <div key={ac.id}>
+                            {ac.landed ? "✅" : "❌"} {ac.id}
+                            {ac.note ? ` ${ac.note}` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-1">
                     <button

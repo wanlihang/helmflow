@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -29,18 +30,24 @@ export function AddFeatureDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [id, setId] = useState("");
   const [domain, setDomain] = useState(defaultDomain);
   const [name, setName] = useState("");
-  const [handler, setHandler] = useState("");
-  const [actions, setActions] = useState("");
-  const [context, setContext] = useState("");
-  const [priority, setPriority] = useState("P2");
+  const [description, setDescription] = useState("");
+
+  // 弹窗每次打开时,把域重置为所在域(避免上次残留)
+  function handleOpenChange(next: boolean) {
+    if (next) setDomain(defaultDomain);
+    onOpenChange(next);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!id.trim() || !domain.trim() || !name.trim()) {
-      setError("ID、域和名称为必填项");
+    if (!name.trim()) {
+      setError("功能名称为必填项");
+      return;
+    }
+    if (!domain.trim()) {
+      setError("域不能为空");
       return;
     }
     setLoading(true);
@@ -50,13 +57,9 @@ export function AddFeatureDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: id.trim(),
           domain: domain.trim(),
           name: name.trim(),
-          handler,
-          actions,
-          context,
-          priority,
+          description,
           projectId,
         }),
       });
@@ -66,12 +69,8 @@ export function AddFeatureDialog({
       }
       onOpenChange(false);
       // 重置表单
-      setId("");
       setName("");
-      setHandler("");
-      setActions("");
-      setContext("");
-      setPriority("P2");
+      setDescription("");
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -81,36 +80,21 @@ export function AddFeatureDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加功能</DialogTitle>
-          <DialogDescription>在域 &quot;{defaultDomain}&quot; 下创建新功能点</DialogDescription>
+          <DialogDescription>
+            在域 &quot;{defaultDomain}&quot; 下创建新功能点 · 编号自动生成
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="mb-1 block text-sm font-medium">功能 ID *</label>
+            <label className="mb-1 block text-sm font-medium" htmlFor="add-feature-name">
+              功能名称 *
+            </label>
             <input
-              type="text"
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-              placeholder="如 D-10"
-            />
-            <p className="mt-0.5 text-xs text-muted-foreground">创建后不可修改</p>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">域</label>
-            <input
-              type="text"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">功能名称 *</label>
-            <input
+              id="add-feature-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -118,47 +102,32 @@ export function AddFeatureDialog({
               placeholder="如 创建交付需求"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Handler</label>
-              <input
-                type="text"
-                value={handler}
-                onChange={(e) => setHandler(e.target.value)}
-                className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Priority</label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-              >
-                <option value="P0">P0</option>
-                <option value="P1">P1</option>
-                <option value="P2">P2</option>
-              </select>
-            </div>
-          </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Actions (逗号分隔)</label>
-            <input
-              type="text"
-              value={actions}
-              onChange={(e) => setActions(e.target.value)}
-              className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
-              placeholder="ActionA, ActionB"
+            <label className="mb-1 block text-sm font-medium" htmlFor="add-feature-desc">
+              功能描述
+            </label>
+            <Textarea
+              id="add-feature-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="用一句话描述这个功能点要做什么(后续需求澄清会基于它展开)..."
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">Context</label>
+            <label className="mb-1 block text-sm font-medium" htmlFor="add-feature-domain">
+              所属域
+            </label>
             <input
+              id="add-feature-domain"
               type="text"
-              value={context}
-              onChange={(e) => setContext(e.target.value)}
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
               className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm"
             />
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              编号按域前缀自动生成(如 {defaultDomain.slice(0, 1).toUpperCase() || "D"}-10),无需手填
+            </p>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}

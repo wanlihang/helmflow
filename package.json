@@ -9,6 +9,9 @@
     "dev": "pnpm --filter @helmflow/portal dev",
     "worker:start": "pnpm --filter @helmflow/worker start",
     "worker:dev": "pnpm --filter @helmflow/worker dev",
+    "terminal:dev": "pnpm --filter @helmflow/terminal-server dev",
+    "terminal:start": "pnpm --filter @helmflow/terminal-server start",
+    "dev:all": "pnpm --parallel --filter @helmflow/portal --filter @helmflow/worker --filter @helmflow/terminal-server dev",
     "helmcode:check": "node scripts/sync-standards.mjs"
   },
   "engines": {

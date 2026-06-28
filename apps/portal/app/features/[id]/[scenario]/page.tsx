@@ -6,8 +6,10 @@ import { CellFiles } from "@/components/cell-files";
 import { CellLifecycleBar } from "@/components/cell-lifecycle-bar";
 import { CellStatusSelect } from "@/components/cell-status-select";
 import { CellTimeline } from "@/components/cell-timeline";
-import { ContractFallbackView, ContractRawView, ContractView } from "@/components/contract-view";
+import { ContractRenderDialog } from "@/components/contract-render-dialog";
+import { ContractFallbackView, ContractView } from "@/components/contract-view";
 import { ReimplementButton } from "@/components/reimplement-button";
+import { RejectContractButton } from "@/components/reject-contract-button";
 import { StartFeatureDialog } from "@/components/start-feature-dialog";
 import { StartFullLoopButton } from "@/components/start-full-loop-button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +25,7 @@ import {
   type RunRow,
   getLatestCommit,
   getLatestContract,
+  getLatestRequireInput,
   listCommitsForCell,
   listContractsForCell,
   listReflectionsForFeature,
@@ -146,6 +149,13 @@ export default async function CellPage({ params }: CellPageProps) {
   const isDeprecated = scenario.status === "废弃";
 
   const contract = loadContractForCell(cellId);
+  // 最近一次「启动需求」输入的原始需求(常驻展示,关闭弹窗后仍可见)
+  let requireInput: { runId: string; userRequest: string; startedAt: string } | null = null;
+  try {
+    requireInput = getLatestRequireInput(getDb(), cellId);
+  } catch {
+    requireInput = null;
+  }
   const allRuns = loadAllRuns(cellId);
   const allContracts = loadAllContracts(cellId);
   const allCommits = loadAllCommits(cellId);
@@ -194,6 +204,25 @@ export default async function CellPage({ params }: CellPageProps) {
           hasContract={contract !== null}
         />
       </header>
+
+      {/* 需求描述(最近一次「启动需求」输入的原文,常驻可见) */}
+      {requireInput ? (
+        <section className="space-y-1 rounded-md border border-border bg-muted/30 p-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-muted-foreground">需求描述</h2>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {requireInput.startedAt}
+            </span>
+          </div>
+          <p className="whitespace-pre-wrap text-sm">{requireInput.userRequest}</p>
+        </section>
+      ) : (
+        canOperate && (
+          <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+            尚未输入需求 · 点下方「启动需求」描述你要实现的行为。
+          </div>
+        )
+      )}
 
       {/* 分层归属精简(链接 feature 页看全) */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -244,7 +273,8 @@ export default async function CellPage({ params }: CellPageProps) {
             />
           )}
         {canOperate && contract?.row.status === "approved" && (
-          <StartFullLoopButton contractId={contract.row.id} />
+          // 契约已 approved(Plan 定稿)→ Act 从 code 起,跳过 clarify
+          <StartFullLoopButton contractId={contract.row.id} startNode="code" />
         )}
         {isSupported && (
           <>
@@ -289,25 +319,25 @@ export default async function CellPage({ params }: CellPageProps) {
                 {contract.row.status}
               </span>
               <span className="font-mono text-muted-foreground">{contract.row.id}</span>
+              {contract.markdown !== null && (
+                <ContractRenderDialog rawMarkdown={contract.markdown} />
+              )}
             </div>
           </div>
           {contract.markdown !== null ? (
             (() => {
               const parsed = parseContract(contract.markdown);
               if (parsed.ok) {
-                return <ContractView contract={parsed.data} rawMarkdown={contract.markdown} />;
+                return <ContractView contract={parsed.data} />;
               }
               // 结构化解析失败(HelmCode 格式或老英文契约)→ 元信息+原文兜底
               const hc = parseHelmcodeContract(contract.markdown, contract.row.markdownPath);
               if (hc.ok) {
-                return <ContractFallbackView meta={hc.data} rawMarkdown={contract.markdown} />;
+                return <ContractFallbackView meta={hc.data} />;
               }
               return (
-                <div className="space-y-2">
-                  <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
-                    契约结构化解析失败(可能为非标准格式),仅展示原文。
-                  </div>
-                  <ContractRawView rawMarkdown={contract.markdown} />
+                <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800">
+                  契约结构化解析失败(可能为非标准格式),可点上方「查看完整契约」弹窗查看原文。
                 </div>
               );
             })()
@@ -317,7 +347,10 @@ export default async function CellPage({ params }: CellPageProps) {
             </div>
           )}
           {canOperate && contract.row.status === "draft" && (
-            <ApproveContractButton contractId={contract.row.id} />
+            <div className="flex gap-2">
+              <ApproveContractButton contractId={contract.row.id} />
+              <RejectContractButton contractId={contract.row.id} />
+            </div>
           )}
         </section>
       )}

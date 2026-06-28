@@ -76,7 +76,7 @@ export function QueuePanel() {
       </div>
       <p className="text-sm text-muted-foreground">
         常驻 worker 自动消费 <strong>已审批</strong> 契约,7×24 排队执行
-        require→code→test→deploy。启动 worker:
+        clarify→code→test→deploy。启动 worker:
         <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
           pnpm worker:start
         </code>
