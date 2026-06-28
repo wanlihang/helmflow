@@ -102,10 +102,9 @@ export function loadWorkerConfig(): WorkerConfig {
   const dailyBudgetUsd =
     dailyBudgetRaw && dailyBudgetRaw.length > 0 ? Number(dailyBudgetRaw) : undefined;
 
-  // 模拟对话节奏(降密集,避免撞端点 RPM):小 session + session 间间隔。
-  // 可用 env 覆盖;设 0 关闭节流。
-  if (!process.env.HELMFLOW_TURNS_PER_SESSION) process.env.HELMFLOW_TURNS_PER_SESSION = "2";
-  if (!process.env.HELMFLOW_TURN_INTERVAL_MS) process.env.HELMFLOW_TURN_INTERVAL_MS = "5000";
+  // turn 不限制:agent 单 session 跑到自然完成(stop),不切碎、不节流。
+  // node-runner 已传 maxTurnsPerSession=最大值;此处不再默认强制小 session。
+  // 如需降密集避 RPM,可显式设 HELMFLOW_TURNS_PER_SESSION / HELMFLOW_TURN_INTERVAL_MS。
 
   return {
     db,

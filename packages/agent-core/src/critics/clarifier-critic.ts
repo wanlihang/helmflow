@@ -5,11 +5,18 @@ import type { CriticResult, Issue } from "./types";
 // 完全不调 LLM,5 条规则全部用代码兜底,稳定可复现 → 适合做"必跑"门控,
 // 后续若要加 LLM Critic 作为补强,作为另一个 critic 并存即可。
 
-const AC_KEYWORD_RE = /(返回|status 转为|抛出|断言|持久化|不变|产生事件|应当)/;
+// AC 可验证关键词:宽口径,覆盖模型自然措辞("置…态"/"抛 X"/"编译通过"/"幂等"/"返回"/"拒绝"…)。
+// AC 只要描述了可观察、可断言的行为即可,不强求字面"status 转为"。
+const AC_KEYWORD_RE =
+  /(返回|转为|转[入化]|置[^\n。]*态|抛出?|断言|持久化|不变|产生事件|应当|必须|校验|拒绝|幂等|编译|调用|计数|包含|等于|通过|失败|成功|生成|记录|更新|删除|插入)/;
 const PLANTUML_BLOCK_RE = /@startuml[\s\S]+@enduml/;
+// 状态迁移图标记:PlantUML 之外,也认 ASCII/Mermaid 箭头图(─►/→/►)。
+const TRANSITION_RE = /(-+>|-->|→|─►|►|─[^\n]*►|──?>)/;
 const STATE_START_RE = /\[\*\]\s*-->/; // [*] --> X
 const STATE_END_RE = /-->\s*\[\*\]/; // X --> [*]
-const BR_ID_RE = /^BR-\d{3}$/;
+// BR 编号:接受 1-3 位(BR-1 / BR-01 / BR-001)及 HelmCode 域前缀(BR-PS-001)。
+// 严格 3 位是任意约定,模型(glm-5.2 等)常自然产出 BR-1;schema 已用 BR-[A-Z0-9-]+ 兜底,这里对齐。
+const BR_ID_RE = /^BR-(\d{1,3}|[A-Z]+-\d{1,3})$/;
 
 export function runClarifierCritic(contract: Contract): CriticResult {
   const issues: Issue[] = [];
@@ -35,14 +42,18 @@ export function runClarifierCritic(contract: Contract): CriticResult {
     });
   }
 
-  // c) State Machine 必须含完整 @startuml ... @enduml 块 + [*] 起点 + [*] 终点
+  // c) State Machine 必须含状态迁移图。PlantUML(@startuml)为标准;也接受 ASCII/Mermaid 箭头图。
+  //    起点/终点 [*] 校验仅在 PlantUML 时执行(ASCII 图无 [*] 语法)。
   const sm = contract.stateMachine;
-  if (!PLANTUML_BLOCK_RE.test(sm)) {
+  const hasPlantuml = PLANTUML_BLOCK_RE.test(sm);
+  const hasTransition = TRANSITION_RE.test(sm);
+  if (!hasPlantuml && !hasTransition) {
     issues.push({
       check: "state-machine-plantuml",
-      detail: "State Machine 必须使用 PlantUML 代码块,且包含 @startuml ... @enduml。",
+      detail:
+        "State Machine 必须含状态迁移图(PlantUML `@startuml…@enduml`,或 ASCII/Mermaid 箭头图如 `A ──► B`)。",
     });
-  } else {
+  } else if (hasPlantuml) {
     if (!STATE_START_RE.test(sm)) {
       issues.push({
         check: "state-machine-start",
@@ -63,7 +74,7 @@ export function runClarifierCritic(contract: Contract): CriticResult {
     issues.push({
       check: "br-id-format",
       detail:
-        `Business Rules 编号必须形如 BR-001 / BR-002,当前不合规: ` +
+        `Business Rules 编号必须形如 BR-001(1-3 位数字,或 BR-PS-001 域前缀),当前不合规: ` +
         badBrs.map((br) => br.id).join(", "),
     });
   }

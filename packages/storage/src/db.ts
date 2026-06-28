@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS features (
   project_id TEXT NOT NULL,
   domain TEXT NOT NULL,
   name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   status TEXT,
   scenarios_json TEXT,
   handler TEXT NOT NULL DEFAULT '',
@@ -54,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_feature_scenarios_feature_id ON feature_scenarios
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   kind TEXT NOT NULL,
   state TEXT NOT NULL,
   started_at TEXT NOT NULL,
@@ -80,6 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_node_attempts_run_id ON node_attempts(run_id);
 CREATE TABLE IF NOT EXISTS contracts (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   status TEXT NOT NULL,
   markdown_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
@@ -92,6 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_contracts_cell_id ON contracts(cell_id);
 CREATE TABLE IF NOT EXISTS commits (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   contract_id TEXT NOT NULL REFERENCES contracts(id),
   coder_run_id TEXT,
   testgen_run_id TEXT,
@@ -107,6 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_commits_cell_id ON commits(cell_id);
 CREATE TABLE IF NOT EXISTS fix_tasks (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   source_run_id TEXT NOT NULL,
   failed_ac_id TEXT NOT NULL,
   expected_behavior TEXT NOT NULL,
@@ -120,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_fix_tasks_cell_id ON fix_tasks(cell_id);
 CREATE TABLE IF NOT EXISTS reflections (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   attempt_id TEXT,
   node_name TEXT NOT NULL,
   critic_name TEXT,
@@ -153,8 +159,37 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL DEFAULT 'active',
   registered_at INTEGER NOT NULL,
   helmcode_version TEXT,
-  standards_checksum TEXT
+  standards_checksum TEXT,
+  merge_branch TEXT NOT NULL DEFAULT 'main'
 );
+
+CREATE TABLE IF NOT EXISTS pending_merges (
+  run_id TEXT PRIMARY KEY,
+  cell_id TEXT NOT NULL,
+  requirement_id TEXT,
+  project_id TEXT NOT NULL,
+  sandbox_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  target_branch TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS requirements (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'clarifying',
+  agent_status TEXT NOT NULL DEFAULT 'not-started',
+  session_id TEXT,
+  clarify_run_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_requirements_project_id ON requirements(project_id);
 
 CREATE TABLE IF NOT EXISTS contract_sync_results (
   id TEXT PRIMARY KEY,
@@ -207,6 +242,7 @@ CREATE INDEX IF NOT EXISTS idx_sm_project ON standards_migrations(project_id);
 CREATE TABLE IF NOT EXISTS pipeline_queue (
   id TEXT PRIMARY KEY,
   cell_id TEXT NOT NULL REFERENCES feature_scenarios(id),
+  requirement_id TEXT,
   contract_id TEXT NOT NULL REFERENCES contracts(id),
   state TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +257,28 @@ CREATE TABLE IF NOT EXISTS pipeline_queue (
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_queue_state ON pipeline_queue(state);
 CREATE INDEX IF NOT EXISTS idx_pipeline_queue_cell_id ON pipeline_queue(cell_id);
+
+CREATE TABLE IF NOT EXISTS llm_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  api_key TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT 'glm-5.2[1M]',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_providers_is_active ON llm_providers(is_active);
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+  id TEXT PRIMARY KEY,
+  skip_deploy INTEGER NOT NULL DEFAULT 1,
+  turns_per_session INTEGER NOT NULL DEFAULT 15,
+  turn_interval_ms INTEGER NOT NULL DEFAULT 0,
+  concurrency INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
 `;
 
 const MIGRATION_DDL = `
@@ -234,6 +292,8 @@ ALTER TABLE features ADD COLUMN legacy_activities TEXT NOT NULL DEFAULT '';
 -- 分层归属扩展(Decider/Acceptor)
 ALTER TABLE features ADD COLUMN decider TEXT NOT NULL DEFAULT '';
 ALTER TABLE features ADD COLUMN acceptor TEXT NOT NULL DEFAULT '';
+-- 功能点大致描述(用户自由文本,区别于分析产出的 implementation)
+ALTER TABLE features ADD COLUMN description TEXT NOT NULL DEFAULT '';
 -- Goal 13: feature_scenarios 新列
 ALTER TABLE feature_scenarios ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
 -- 控制平面回归: contracts 加列(为 HelmCode 契约导入铺路,第一刀不写入)
@@ -243,8 +303,16 @@ ALTER TABLE contracts ADD COLUMN origin_path TEXT NOT NULL DEFAULT '';
 -- 控制平面回归第三刀: 版本感知(projects + node_attempts)
 ALTER TABLE projects ADD COLUMN helmcode_version TEXT;
 ALTER TABLE projects ADD COLUMN standards_checksum TEXT;
+ALTER TABLE projects ADD COLUMN merge_branch TEXT NOT NULL DEFAULT 'main';
 ALTER TABLE node_attempts ADD COLUMN standards_version TEXT;
 ALTER TABLE node_attempts ADD COLUMN standards_checksum TEXT;
+-- 需求驱动通路: 六表加 requirement_id(可空,需求 owned 时填 requirements.id)
+ALTER TABLE runs ADD COLUMN requirement_id TEXT;
+ALTER TABLE contracts ADD COLUMN requirement_id TEXT;
+ALTER TABLE commits ADD COLUMN requirement_id TEXT;
+ALTER TABLE fix_tasks ADD COLUMN requirement_id TEXT;
+ALTER TABLE reflections ADD COLUMN requirement_id TEXT;
+ALTER TABLE pipeline_queue ADD COLUMN requirement_id TEXT;
 `;
 
 const cache = new Map<string, DB>();

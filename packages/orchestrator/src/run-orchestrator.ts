@@ -3,22 +3,29 @@ import { isAbsolute, join } from "node:path";
 import { parseContract, type Contract } from "@helmflow/contract-schema";
 import {
   createFixTask,
+  createPendingMerge,
   createReflection,
   createRun,
   createRunEvent,
+  getCellRow,
   getContractById,
-  listReflectionsForFeature,
-  listFixTasks,
-  updateRun,
+  getProjectById,
+  getRequirement,
+  listFixTasksWorkUnit,
+  listReflectionsForWorkUnit,
   updateCellAgentStatus,
   updateFeatureScenarioStatus,
-  getCellRow,
+  updateRequirementAgentStatus,
+  updateRequirementStatus,
+  updateRun,
   type ContractRow,
+  type DB,
+  type RequirementAgentStatus,
+  type WorkUnit,
 } from "@helmflow/storage";
 import {
   createWorktree,
   removeWorktree,
-  mergeWorktreeIntoMain,
   acquireSemaphore,
   releaseSemaphore,
   registerActiveRun,
@@ -31,10 +38,23 @@ import { nextNode, MAX_GLOBAL_LOOPS, MAX_RETRIES, type PipelineNode } from "./st
 import type { OrchestratorEvent, OrchestratorOptions, NodeRunnerResult } from "./types";
 
 // 新 4 节点 runners
-import { runRequireNode } from "./node-runners/require";
+import { runClarifyNode } from "./node-runners/clarify";
 import { runCodeNode } from "./node-runners/code";
 import { runTestNode } from "./node-runners/test";
 import { runDeployNode } from "./node-runners/deploy";
+
+/**
+ * 流水线节点 → cell agentStatus 映射。
+ * 每个节点开始时推进 cell 的开发状态,使功能点详情/生命周期条与 run 页面 pipeline 保持一致
+ * (解决"功能点状态与全流程状态不一致"):clarify→澄清中, code→实施中, test→测试待跑, deploy→QA通过。
+ * done/blocked 仍由 runOrchestrator 末尾统一设置(覆盖)。
+ */
+const NODE_AGENT_STATUS: Record<PipelineNode, string> = {
+  clarify: "clarifying",
+  code: "implementing",
+  test: "tests-pending",
+  deploy: "qa-passed",
+};
 
 interface FeatureInfo {
   id: string;
@@ -42,15 +62,37 @@ interface FeatureInfo {
   domainId: string;
   projectId: string;
   cellId: string;
+  /** 需求驱动通路:requirement-owned 时填 requirementId,否则 null */
+  requirementId: string | null;
+  isRequirement: boolean;
 }
 
-function loadFeatureFromContract(contract: Contract, contractRow: ContractRow): FeatureInfo {
+function loadFeatureFromContract(
+  db: DB,
+  contract: Contract,
+  contractRow: ContractRow,
+): FeatureInfo {
+  // 需求驱动通路:requirement-owned 契约(cellId 为虚拟 cell 脊柱)
+  if (contractRow.requirementId) {
+    const req = getRequirement(db, contractRow.requirementId);
+    return {
+      id: contractRow.requirementId,
+      name: req?.title ?? contract.featureId,
+      domainId: contract.domain || "需求驱动",
+      projectId: contractRow.projectId || req?.projectId || "",
+      cellId: contractRow.cellId,
+      requirementId: contractRow.requirementId,
+      isRequirement: true,
+    };
+  }
   return {
     id: contract.featureId,
     name: contract.featureId,
     domainId: contract.domain,
     projectId: contractRow.projectId || contract.matrixCellId,
     cellId: contractRow.cellId,
+    requirementId: null,
+    isRequirement: false,
   };
 }
 
@@ -94,7 +136,32 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
     return;
   }
   const contract = parsed.data;
-  const feature = loadFeatureFromContract(contract, contractRow);
+  const feature = loadFeatureFromContract(db, contract, contractRow);
+
+  // 工作单元(cell 矩阵通路 | requirement 需求驱动通路)。决定 runs/reflections/fixTasks 归属。
+  const workUnit: WorkUnit = feature.isRequirement
+    ? { kind: "requirement", requirementId: feature.requirementId! }
+    : { kind: "cell", cellId: feature.cellId };
+
+  /**
+   * 统一推进开发状态:cell→cellAgentStatus,requirement→requirementAgentStatus。
+   * requirement 的 agentStatus 枚举不含 tests-pending/qa-passed,统一收敛为 implementing。
+   */
+  const setAgentStatus = (status: string): void => {
+    if (feature.isRequirement && feature.requirementId) {
+      const reqStatus: RequirementAgentStatus =
+        status === "done"
+          ? "done"
+          : status === "blocked"
+            ? "blocked"
+            : status === "clarifying"
+              ? "clarifying"
+              : "implementing";
+      updateRequirementAgentStatus(db, feature.requirementId, reqStatus);
+    } else {
+      updateCellAgentStatus(db, feature.cellId, status);
+    }
+  };
 
   // NOTE: registerActiveRun is delayed until after semaphore acquisition
   // to avoid leaving stale entries if acquireSemaphore fails.
@@ -119,7 +186,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
     superRunId,
     featureId: feature.id,
     contractId: contractRow.id,
-    currentNode: "require",
+    currentNode: opts.startNode ?? "clarify",
     startedAt: new Date().toISOString(),
     worktreePath: null,
     status: "running",
@@ -129,7 +196,15 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
     emit({ type: "queued", position: queuePos });
   }
 
-  const branchName = `helmflow-${feature.cellId}-${superRunId}`;
+  // 分支名带可读时间戳(YYYYMMDD-HHMMSS,本地时,到秒),便于区分并行任务;superRunId 保证唯一 + 可追溯到 run
+  const branchStamp = (() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  })();
+  const branchName = feature.isRequirement
+    ? `helmflow-req-${branchStamp}-${feature.requirementId}-${superRunId}`
+    : `helmflow-${branchStamp}-${feature.cellId}-${superRunId}`;
   let worktreePath: string;
   try {
     const wt = createWorktree({ sandboxPath, branchName });
@@ -143,7 +218,13 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
     return;
   }
 
-  const superRun = createRun(db, feature.cellId, "full-loop", superRunId);
+  const superRun = createRun(
+    db,
+    feature.cellId,
+    "full-loop",
+    superRunId,
+    feature.requirementId ?? undefined,
+  );
   emit({
     type: "orchestrator-start",
     superRunId,
@@ -152,16 +233,25 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
   });
 
   const startTime = Date.now();
-  let currentNode: PipelineNode = "require";
+  // 需求驱动通路:契约已由对话 clarify 产出,startNode 默认 code(跳过 clarify 节点)。
+  let currentNode: PipelineNode = opts.startNode ?? (feature.isRequirement ? "code" : "clarify");
   let globalLoops = 0;
   const nodeRetries: Record<PipelineNode, number> = {
-    require: 0,
+    clarify: 0,
     code: 0,
     test: 0,
     deploy: 0,
   };
   const iterations: Record<PipelineNode, number> = {
-    require: 0,
+    clarify: 0,
+    code: 0,
+    test: 0,
+    deploy: 0,
+  };
+  // infra(529/网络)独立重试计数:不进 nodeRetries/globalLoops/iterations,
+  // 避免基础设施错误污染业务回路预算。配合 state-machine 的 infra-error 路由。
+  const infraRetries: Record<PipelineNode, number> = {
+    clarify: 0,
     code: 0,
     test: 0,
     deploy: 0,
@@ -173,16 +263,19 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
       const iteration = iterations[currentNode];
 
       updateActiveRunNode(superRunId, currentNode);
+      // 推进 cell/requirement 的开发状态,与 run 页面 pipeline 同步
+      setAgentStatus(NODE_AGENT_STATUS[currentNode]);
       emit({ type: "node-start", node: currentNode, iteration, runId: superRun.id });
 
       let result: NodeRunnerResult;
 
       switch (currentNode) {
-        case "require": {
-          const refs = listReflectionsForFeature(db, feature.cellId, 5);
-          result = await runRequireNode({
+        case "clarify": {
+          const refs = listReflectionsForWorkUnit(db, workUnit, 5);
+          result = await runClarifyNode({
             db,
             cellId: feature.cellId,
+            requirementId: feature.requirementId ?? undefined,
             featureName: feature.name,
             domainId: feature.domainId,
             contract,
@@ -191,16 +284,17 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
             iteration,
             helmcodeRoot,
             reflections: refs,
-            onEvent: (ev) => emit({ type: "node-event", node: "require", event: ev }),
+            onEvent: (ev) => emit({ type: "node-event", node: "clarify", event: ev }),
           });
           break;
         }
         case "code": {
-          const refs = listReflectionsForFeature(db, feature.cellId, 5);
-          const fts = listFixTasks(db, feature.cellId);
+          const refs = listReflectionsForWorkUnit(db, workUnit, 5);
+          const fts = listFixTasksWorkUnit(db, workUnit);
           result = await runCodeNode({
             db,
             cellId: feature.cellId,
+            requirementId: feature.requirementId ?? undefined,
             featureName: feature.name,
             domainId: feature.domainId,
             contract,
@@ -218,6 +312,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
           result = await runTestNode({
             db,
             cellId: feature.cellId,
+            requirementId: feature.requirementId ?? undefined,
             featureName: feature.name,
             domainId: feature.domainId,
             contract,
@@ -234,6 +329,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
           result = await runDeployNode({
             db,
             cellId: feature.cellId,
+            requirementId: feature.requirementId ?? undefined,
             featureName: feature.name,
             domainId: feature.domainId,
             contract,
@@ -266,6 +362,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
         if (currentNode !== "deploy") {
           const ref = createReflection(db, {
             cellId: feature.cellId,
+            requirementId: feature.requirementId ?? null,
             nodeName: currentNode,
             failureSummary: result.failReason ?? (result.issues?.map((i) => i.detail).join("; ") || "node failed"),
             reflectionText: result.issues?.map((i) => `[${i.check}] ${i.detail}`).join("\n") ?? result.failReason ?? "unknown failure",
@@ -279,6 +376,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
           for (const ac of failedAcs) {
             const ft = createFixTask(db, {
               cellId: feature.cellId,
+              requirementId: feature.requirementId ?? null,
               sourceRunId: result.runId,
               failedAcId: ac.acId,
               expectedBehavior: `AC ${ac.acId} should pass`,
@@ -297,9 +395,45 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
         nodeRetries[currentNode],
         globalLoops,
         nodeRetries,
+        infraRetries[currentNode],
       );
-      // 终态可配置:HELMFLOW_SKIP_DEPLOY=1 时 test 通过即视为 done,产出"通过测试的
-      // 代码"(merge worktree),不进入 deploy 节点(适配无 gh / 内网 GitLab 等场景)。
+      // 【人工确认合并门槛】test 通过后一律停到 pending-confirm:不自动 merge、不跑 deploy 节点。
+      // worktree 保留,merge/deploy 由 POST /api/runs/[id]/confirm-merge 在人工确认后触发。
+      if (currentNode === "test" && outcome === "pass") {
+        const targetBranch = getProjectById(db, feature.projectId)?.mergeBranch ?? "main";
+        const mode: "local" | "deploy" =
+          process.env.HELMFLOW_SKIP_DEPLOY === "1" ? "local" : "deploy";
+        try {
+          createPendingMerge(db, {
+            runId: superRun.id,
+            cellId: feature.cellId,
+            requirementId: feature.requirementId,
+            projectId: feature.projectId,
+            sandboxPath,
+            worktreePath,
+            branchName,
+            targetBranch,
+            mode,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          emit({ type: "error", message: `Failed to record pending-merge: ${msg}` });
+        }
+        updateRun(db, superRun.id, "pending-confirm");
+        emit({
+          type: "pending-confirm",
+          runId: superRun.id,
+          worktreePath,
+          branchName,
+          targetBranch,
+          mode,
+        });
+        // 不 merge/deploy、不动 cell/req 终态(留 tests-pending),保留 worktree;finally 会释放信号量 + removeActiveRun
+        return;
+      }
+
+      // 终态可配置:HELMFLOW_SKIP_DEPLOY=1 时 test 通过即视为 done。
+      // 注意:正常 test-pass 已被上方 pending-confirm 拦截,此分支仅边缘路径(如 startNode=deploy)可达。
       if (
         decision.action === "next" &&
         decision.node === "deploy" &&
@@ -309,15 +443,7 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
       }
 
       if (decision.action === "done") {
-        try {
-          mergeWorktreeIntoMain({ worktreePath, sandboxPath, branchName });
-          emit({ type: "worktree-merge", success: true });
-        } catch (err) {
-          const mergeErr = err instanceof Error ? err.message : String(err);
-          emit({ type: "worktree-merge", success: false, error: mergeErr });
-          emit({ type: "worktree-retained", worktreePath, reason: `Merge failed: ${mergeErr}` });
-        }
-        // Cleanup worktree independently of merge result
+        // 边缘路径兜底:只做终态收敛 + worktree 清理,不自动 merge(合并统一由 confirm API 负责)。
         try {
           removeWorktree({ sandboxPath, worktreePath, branchName });
         } catch (cleanupErr) {
@@ -326,10 +452,14 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
         }
 
         updateRun(db, superRun.id, "done");
-        updateCellAgentStatus(db, feature.cellId, "done");
-        const cellRow = getCellRow(db, feature.cellId);
-        if (cellRow && (cellRow.scenarioStatus === "需改造" || cellRow.scenarioStatus === "待实现")) {
-          updateFeatureScenarioStatus(db, cellRow.featureId, cellRow.scenarioName, "已支持");
+        setAgentStatus("done");
+        if (feature.isRequirement && feature.requirementId) {
+          updateRequirementStatus(db, feature.requirementId, "done");
+        } else {
+          const cellRow = getCellRow(db, feature.cellId);
+          if (cellRow && (cellRow.scenarioStatus === "需改造" || cellRow.scenarioStatus === "待实现")) {
+            updateFeatureScenarioStatus(db, cellRow.featureId, cellRow.scenarioName, "已支持");
+          }
         }
         emit({
           type: "done",
@@ -345,7 +475,10 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
 
       if (decision.action === "blocked") {
         updateRun(db, superRun.id, "failed");
-        updateCellAgentStatus(db, feature.cellId, "blocked");
+        setAgentStatus("blocked");
+        if (feature.isRequirement && feature.requirementId) {
+          updateRequirementStatus(db, feature.requirementId, "blocked");
+        }
         emit({ type: "escalate", reason: decision.reason ?? "Blocked", loop: globalLoops });
         emit({ type: "worktree-retained", worktreePath, reason: `Blocked: ${decision.reason ?? "unknown"}` });
         emit({ type: "done", success: false, totalLoops: globalLoops, totalDurationMs: Date.now() - startTime });
@@ -353,6 +486,22 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
       }
 
       if (decision.action === "retry") {
+        if (decision.reason === "infra-error") {
+          // infra(529/网络):当前节点原地退避重试。不消耗业务 retry、不进 globalLoops、不增 iteration。
+          infraRetries[currentNode]++;
+          const backoffMs = Number(process.env.HELMFLOW_INFRA_BACKOFF_MS) || 30_000;
+          emit({
+            type: "loop-iteration",
+            loop: globalLoops,
+            maxLoops: MAX_GLOBAL_LOOPS,
+            routeTo: decision.node!,
+            infraRetry: true,
+            infraBackoffMs: backoffMs,
+          });
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          currentNode = decision.node!; // == current,原地重试
+          continue;
+        }
         nodeRetries[decision.node!]++;
         globalLoops++;
 
@@ -371,7 +520,10 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<void> 
     const message = err instanceof Error ? err.message : String(err);
     try {
       updateRun(db, superRun.id, "failed");
-      updateCellAgentStatus(db, feature.cellId, "blocked");
+      setAgentStatus("blocked");
+      if (feature.isRequirement && feature.requirementId) {
+        updateRequirementStatus(db, feature.requirementId, "blocked");
+      }
     } catch {
       // ignore DB error during cleanup
     }

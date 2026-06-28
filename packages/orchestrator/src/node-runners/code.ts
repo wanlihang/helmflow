@@ -9,9 +9,12 @@ import { join } from "node:path";
 import type { Contract } from "@helmflow/contract-schema";
 import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
+  classifyError,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
+import { mapFailReason } from "./fail-reason";
+import { buildCodeCheckPrompt, getSelfCheckRounds, runSelfCheck } from "./self-check";
 import {
   createAttempt,
   createRun,
@@ -27,11 +30,14 @@ import {
   buildReflectionAppendix,
 } from "../prompt-builder";
 
-const MAX_TURNS = 40;
+// 不限制 turn:单 session 跑到自然完成(stop),不切碎。
+const MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
 interface RunCodeNodeArgs {
   db: DB;
   cellId: string;
+  /** 需求驱动通路:requirement-owned 时填 requirementId */
+  requirementId?: string | null;
   featureName: string;
   domainId: string;
   contract: Contract;
@@ -75,7 +81,7 @@ export async function runCodeNode(args: RunCodeNodeArgs): Promise<NodeRunnerResu
     : [];
   ensureSandboxGitInit(args.sandboxPath);
 
-  const run = createRun(args.db, args.cellId, "code");
+  const run = createRun(args.db, args.cellId, "code", undefined, args.requirementId ?? undefined);
   const attempt = createAttempt(args.db, run.id, "code", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const reflectionAppendix = buildReflectionAppendix(args.reflections ?? []);
@@ -111,22 +117,51 @@ ${fixTaskAppendix}${reflectionAppendix}
       userPrompt,
       allowedTools: ["Read", "Write", "Edit", "Bash"],
       maxTurns: MAX_TURNS,
+      maxTurnsPerSession: MAX_TURNS,
       additionalDirectories: allAdditionalDirs,
       onEvent: args.onEvent,
     });
+
+    // 对抗式自检:主实现成功后,resume 续接对照 BR/AC 找遗漏(默认1轮,env
+    // HELMFLOW_SELF_CHECK_ROUNDS 可配,封顶3)。依据 Self-Refine:第1轮收益最大;
+    // Reflexion:对抗式 framing 缓解 sycophancy。自检失败不阻塞主结果。
+    let checkTurns = 0;
+    let checkDurationMs = 0;
+    let checkCostUsd = 0;
+    if (nodeResult.success) {
+      const rounds = getSelfCheckRounds();
+      if (rounds > 0) {
+        try {
+          const chk = await runSelfCheck({
+            sandboxPath: args.sandboxPath,
+            systemPrompt,
+            primarySessionId: nodeResult.sessionId,
+            rounds,
+            prompt: buildCodeCheckPrompt(args.contract),
+            onEvent: args.onEvent,
+          });
+          checkTurns = chk.turns;
+          checkDurationMs = chk.durationMs;
+          checkCostUsd = chk.costUsd ?? 0;
+        } catch {
+          // 自检失败不阻塞:主实现已成功,自检仅额外补全
+        }
+      }
+    }
 
     const status = nodeResult.success ? "passed" : "failed";
     updateAttempt(args.db, attempt.id, { status });
     updateRun(args.db, run.id, nodeResult.success ? "done" : "failed");
 
+    const totalCostUsd = (nodeResult.costUsd ?? 0) + checkCostUsd;
     return {
       success: nodeResult.success,
       runId: run.id,
-      failReason: nodeResult.success ? undefined : "build-failed",
+      failReason: mapFailReason(nodeResult.success, nodeResult.errorKind, "build-failed"),
       issues: nodeResult.success ? undefined : [{ check: "implement-failed", detail: nodeResult.error ?? "code node failed" }],
-      turns: nodeResult.turns,
-      durationMs: nodeResult.durationMs,
-      costUsd: nodeResult.costUsd,
+      turns: nodeResult.turns + checkTurns,
+      durationMs: nodeResult.durationMs + checkDurationMs,
+      costUsd: totalCostUsd > 0 ? totalCostUsd : undefined,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -135,7 +170,7 @@ ${fixTaskAppendix}${reflectionAppendix}
     return {
       success: false,
       runId: run.id,
-      failReason: "build-failed",
+      failReason: classifyError(message) === "transient-infra" ? "infra-error" : "build-failed",
       issues: [{ check: "code-exception", detail: message }],
     };
   }

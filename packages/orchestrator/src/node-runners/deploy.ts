@@ -8,27 +8,33 @@ import { join } from "node:path";
 import type { Contract } from "@helmflow/contract-schema";
 import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
+  classifyError,
   loadSkillBody,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
+import { mapFailReason } from "./fail-reason";
 import {
   createAttempt,
   createCommit,
   createRun,
-  getLatestRunByKind,
+  getLatestRunByKindWorkUnit,
   updateAttempt,
   updateRun,
   type DB,
   type ContractRow,
+  type WorkUnit,
 } from "@helmflow/storage";
 import type { NodeRunnerResult } from "../types";
 
-const MAX_TURNS = 12;
+// 不限制 turn:单 session 跑到自然完成(stop),不切碎。
+const MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
 interface RunDeployNodeArgs {
   db: DB;
   cellId: string;
+  /** 需求驱动通路:requirement-owned 时填 requirementId */
+  requirementId?: string | null;
   featureName: string;
   domainId: string;
   contract: Contract;
@@ -78,13 +84,17 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
     };
   }
 
-  const coderRun = getLatestRunByKind(args.db, args.cellId, "code");
-  const testRun = getLatestRunByKind(args.db, args.cellId, "test");
+  // 需求驱动通路:多需求共享虚拟 cellId,必须按 workUnit(requirement_id)查本需求的 run。
+  const lookupWu: WorkUnit = args.requirementId
+    ? { kind: "requirement", requirementId: args.requirementId }
+    : { kind: "cell", cellId: args.cellId };
+  const coderRun = getLatestRunByKindWorkUnit(args.db, lookupWu, "code");
+  const testRun = getLatestRunByKindWorkUnit(args.db, lookupWu, "test");
 
   const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
   const versionInfo = manager?.getVersion();
 
-  const run = createRun(args.db, args.cellId, "deploy");
+  const run = createRun(args.db, args.cellId, "deploy", undefined, args.requirementId ?? undefined);
   const attempt = createAttempt(args.db, run.id, "deploy", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const acIds = args.contract.acceptanceCriteria.map((a) => a.id);
@@ -123,6 +133,7 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
       userPrompt,
       allowedTools: ["Read", "Bash"],
       maxTurns: MAX_TURNS,
+      maxTurnsPerSession: MAX_TURNS,
       onEvent: (event: NodeRunEvent) => {
         if (event.type === "assistant.text") {
           collectedText.push(event.text);
@@ -137,7 +148,7 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
       return {
         success: false,
         runId: run.id,
-        failReason: "git-error",
+        failReason: mapFailReason(false, nodeResult.errorKind, "git-error"),
         issues: [{ check: "deploy-failed", detail: nodeResult.error ?? "deploy node failed" }],
         turns: nodeResult.turns,
         durationMs: nodeResult.durationMs,
@@ -182,6 +193,7 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
 
     const commitRow = createCommit(args.db, {
       cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
       contractId: args.contractRow.id,
       coderRunId: coderRun?.id ?? null,
       testgenRunId: testRun?.id ?? null,
@@ -212,7 +224,7 @@ export async function runDeployNode(args: RunDeployNodeArgs): Promise<NodeRunner
     return {
       success: false,
       runId: run.id,
-      failReason: "git-error",
+      failReason: classifyError(errMsg) === "transient-infra" ? "infra-error" : "git-error",
       issues: [{ check: "deploy-exception", detail: errMsg }],
     };
   }

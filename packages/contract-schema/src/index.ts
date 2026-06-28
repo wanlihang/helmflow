@@ -18,13 +18,13 @@ export const ContractStatus = z.enum([
 export type ContractStatus = z.infer<typeof ContractStatus>;
 
 export const BusinessRuleSchema = z.object({
-  id: z.string().regex(/^BR-\d{3}$/, "businessRule.id 必须形如 BR-001"),
+  id: z.string().regex(/^BR-[A-Z0-9-]+$/, "businessRule.id 必须形如 BR-001 或 BR-PS-001(含域前缀)"),
   text: z.string().min(1),
 });
 export type BusinessRule = z.infer<typeof BusinessRuleSchema>;
 
 export const AcceptanceCriterionSchema = z.object({
-  id: z.string().regex(/^AC-\d{3}$/, "acceptanceCriteria.id 必须形如 AC-001"),
+  id: z.string().regex(/^AC-\d{1,3}$/, "acceptanceCriteria.id 必须形如 AC-001(1-3 位数字)"),
   text: z.string().min(1),
 });
 export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
@@ -38,7 +38,7 @@ export type ApiContractEntry = z.infer<typeof ApiContractEntrySchema>;
 
 // AC-测试映射表一行:AC | 测试类 | 测试方法 | 断言类型
 export const AcTestMappingRowSchema = z.object({
-  acId: z.string().regex(/^AC-\d{3}$/),
+  acId: z.string().regex(/^AC-\d{1,3}$/),
   testClass: z.string().min(1),
   testMethod: z.string().min(1),
 });
@@ -134,8 +134,11 @@ function splitSections(body: string): Map<string, string> {
 
 /**
  * 提取 BR/AC 列表。兼容:
- *   - `- BR-001: 描述`(老格式)
- *   - `- [ ] AC-001: 描述 — 验证方式: 测试 — 优先级: P0`(HelmCode checkbox 格式,
+ *   - `- BR-001: 描述`(破折号列表)
+ *   - `* AC-001: …`(星号列表)
+ *   - `1. AC-001 …`(有序列表 —— 模型常用,锚点放宽到此)
+ *   - `- **BR-PS-001**: 描述`(HelmCode 域前缀 + 粗体,先去 ** 再匹配)
+ *   - `- [ ] AC-001: 描述 — 验证方式: 测试 — 优先级: P0`(checkbox 格式,
  *     截断到首个 ` — ` 或 ` -- ` 分隔符前作为 text,避免验证方式/优先级污染)
  */
 function extractIdList(
@@ -143,11 +146,15 @@ function extractIdList(
   prefix: "BR" | "AC",
 ): { id: string; text: string }[] {
   const items: { id: string; text: string }[] = [];
+  // id 后的分隔符可选(空格/冒号/竖线/括号/顿号),兼容模型各种漂移:
+  //   `AC-1: 描述` / `AC-1 | 内容` / `AC-1(优先级…):内容` / `AC-1 内容`
   const re = new RegExp(
-    `^[\\-\\*]\\s*(?:\\[[ xX]\\]\\s*)?(${prefix}-\\d{3})[\\s::：]+(.+)$`,
+    `^(?:[\\-\\*]|\\d+\\.)\\s*(?:\\[[ xX]\\]\\s*)?(${prefix}-[A-Z0-9-]+)[\\s::：|（）()、,]*(.+)$`,
   );
   for (const raw of block.split(/\r?\n/)) {
-    const m = raw.trim().match(re);
+    // 去粗体标记(**BR-xxx** → BR-xxx),兼容 HelmCode 粗体产出
+    const line = raw.trim().replace(/\*\*/g, "");
+    const m = line.match(re);
     if (m && m[1] !== undefined && m[2] !== undefined) {
       // 截断 AC 的 ` — 验证方式: ... — 优先级: ...` 尾部
       const text = m[2].split(/\s+[—–-]+\s/)[0]!.trim();
@@ -155,6 +162,41 @@ function extractIdList(
     }
   }
   return items;
+}
+
+/**
+ * 解析验收条件表格(`| AC-1 | P0 | 测试 | 描述 |`)。
+ * 模型(glm-5.2 等)常把 AC 输出成表格而非 HelmCode 标准列表,这里作兜底:
+ * 首列匹配 AC-\d{1,3},末列作为 text(内容列)。
+ */
+function parseAcTable(block: string): { id: string; text: string }[] {
+  const rows: { id: string; text: string }[] = [];
+  for (const raw of block.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.startsWith("|")) continue;
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length < 2) continue;
+    const first = (cells[0] ?? "").replace(/\*\*/g, "");
+    const m = first.match(/^(AC-\d{1,3})$/);
+    if (!m) continue; // 跳过表头/分隔行
+    const text = (cells[cells.length - 1] ?? "").replace(/\*\*/g, "").trim();
+    rows.push({ id: m[1]!, text });
+  }
+  return rows;
+}
+
+/**
+ * 提取验收条件。两种来源,按可信度选取:
+ *   1. 表格优先 —— 模型常把 AC 写成 `| AC-N | … | 内容 |` 表格,明确无歧义。
+ *   2. 无表格时回退 HelmCode 标准列表式(`- [ ] AC-001: 描述`),并过滤"AC-测试映射"项
+ *      (形如 `- AC-1 → Test#method`),否则会误抓映射列表、text 变成测试方法名。
+ */
+function extractAcList(block: string): { id: string; text: string }[] {
+  const table = parseAcTable(block);
+  if (table.length > 0) return table;
+  return extractIdList(block, "AC").filter(
+    (it) => !/→|^\s*`?[A-Z][\w]*#/.test(it.text),
+  );
 }
 
 function parseApiTable(block: string): ApiContractEntry[] {
@@ -183,6 +225,52 @@ function parseApiTable(block: string): ApiContractEntry[] {
   return rows;
 }
 
+/**
+ * 从 ```java 代码块抽 Facade 方法签名(模型常把 Java/SOFABoot API 写成代码块,
+ * 比 markdown 表格更忠实)。匹配 `[修饰符] Result<Resp> name(params)` 或 `Resp name(params)`。
+ * 仅在 parseApiTable(表格)无结果时作为兜底调用(见 parseApiContract)。
+ */
+function parseApiFromCodeBlocks(block: string): ApiContractEntry[] {
+  const rows: ApiContractEntry[] = [];
+  const codeBlocks = block.match(/```[a-z]*\n([\s\S]*?)```/gi) ?? [];
+  const code = codeBlocks
+    .map((c) => c.replace(/```[a-z]*\n?/i, "").replace(/```\s*$/, ""))
+    .join("\n");
+  // 归一化:把多行签名压成单行
+  const flat = code.replace(/\n\s*/g, " ");
+  const re =
+    /(?:Result<([A-Za-z_][\w]*)>|([A-Za-z_][\w]*))\s+([A-Za-z_][\w]*)\s*\(([^)]*)\)/g;
+  const EXCLUDE = new Set(["if", "for", "while", "switch", "return", "new", "catch", "throws"]);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(flat)) !== null) {
+    const response = (m[1] ?? m[2] ?? "").trim();
+    const method = (m[3] ?? "").trim();
+    const params = m[4] ?? "";
+    if (!method || EXCLUDE.has(method)) continue;
+    // 首个参数类型作为 request(去 @注解 与参数名)
+    const firstParam =
+      params
+        .split(",")
+        .map((s) => s.trim())
+        .find((p) => p.length > 0) ?? "";
+    const reqType = firstParam
+      .replace(/^@\w+\s+/, "")
+      .replace(/\s+[A-Za-z_]\w*$/, "")
+      .trim();
+    rows.push({ method, request: reqType || "-", response: response || "-" });
+  }
+  return rows;
+}
+
+/**
+ * 解析 API 契约:HelmCode 标准 markdown 表格优先;表格无结果时回退 java 代码块方法签名。
+ */
+function parseApiContract(block: string): ApiContractEntry[] {
+  const tableRows = parseApiTable(block);
+  if (tableRows.length > 0) return tableRows;
+  return parseApiFromCodeBlocks(block);
+}
+
 /** 解析 AC-测试映射表(`| AC | 测试类 | 测试方法/case | 断言类型 |`) */
 function parseAcTestMappingTable(block: string): AcTestMappingRow[] {
   const rows: AcTestMappingRow[] = [];
@@ -192,7 +280,7 @@ function parseAcTestMappingTable(block: string): AcTestMappingRow[] {
     const cells = line.split("|").slice(1, -1).map((c) => c.trim());
     if (cells.length < 3) continue;
     const first = cells[0] ?? "";
-    if (!/^AC-\d{3}$/.test(first)) continue; // 跳过表头/分隔行
+    if (!/^AC-\d{1,3}$/.test(first)) continue; // 跳过表头/分隔行
     rows.push({
       acId: first,
       testClass: cells[1] ?? "",
@@ -240,8 +328,8 @@ export function parseContract(md: string): ParseResult {
     problemDefinition: getSection(sections, HEADING_ALIASES["问题定义"]!),
     stateMachine: getSection(sections, HEADING_ALIASES["状态机"]!),
     businessRules: extractIdList(getSection(sections, HEADING_ALIASES["业务规则"]!), "BR"),
-    acceptanceCriteria: extractIdList(getSection(sections, ["验收条件", "Acceptance Criteria"]), "AC"),
-    apiContract: parseApiTable(getSection(sections, HEADING_ALIASES["API契约"]!)),
+    acceptanceCriteria: extractAcList(getSection(sections, ["验收条件", "Acceptance Criteria"])),
+    apiContract: parseApiContract(getSection(sections, HEADING_ALIASES["API契约"]!)),
     domainModel: getSection(sections, HEADING_ALIASES["领域模型"]!),
     schemaChanges: getSection(sections, OPTIONAL_HEADINGS["Schema变更"]!),
     compatibilityConstraints: getSection(sections, OPTIONAL_HEADINGS["兼容性约束"]!),
@@ -280,7 +368,7 @@ export const TestAcMappingTestSchema = z.object({
 });
 
 export const TestAcMappingEntrySchema = z.object({
-  acId: z.string().regex(/^AC-\d{3}$/, "acId 必须形如 AC-001"),
+  acId: z.string().regex(/^AC-\d{1,3}$/, "acId 必须形如 AC-001(1-3 位数字)"),
   tests: z.array(TestAcMappingTestSchema).min(1, "每条 AC 至少 1 个测试映射"),
 });
 
@@ -327,7 +415,7 @@ export const QaEscalateActionSchema = z.enum([
 export type QaEscalateAction = z.infer<typeof QaEscalateActionSchema>;
 
 export const QaAcResultSchema = z.object({
-  acId: z.string().regex(/^AC-\d{3}$/, "acId 必须形如 AC-001"),
+  acId: z.string().regex(/^AC-\d{1,3}$/, "acId 必须形如 AC-001(1-3 位数字)"),
   status: QaAcStatusSchema,
   tests: z.array(z.string()).optional().default([]),
   failureReason: z.string().optional(),

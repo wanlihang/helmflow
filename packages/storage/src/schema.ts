@@ -9,6 +9,8 @@ export const features = sqliteTable("features", {
   projectId: text("project_id").notNull(),
   domain: text("domain").notNull(),
   name: text("name").notNull(),
+  /** 功能点的大致描述(用户输入的自由文本),区别于 implementation(分析产出的分层归属)。 */
+  description: text("description").notNull().default(""),
   status: text("status"),
   scenariosJson: text("scenarios_json"),
   handler: text("handler").notNull().default(""),
@@ -51,6 +53,9 @@ export const runs = sqliteTable("runs", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  // 需求驱动通路:requirement-owned 时填 requirements.id;cell-owned 时 NULL。
+  // cellId 恒非空(需求行用 VIRTUAL_CELL_ID 占位),归属由 requirementId 判定。
+  requirementId: text("requirement_id"),
   kind: text("kind").notNull(),
   state: text("state").notNull(),
   startedAt: text("started_at").notNull(),
@@ -84,6 +89,7 @@ export const contracts = sqliteTable("contracts", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  requirementId: text("requirement_id"),
   status: text("status").notNull(),
   markdownPath: text("markdown_path").notNull(),
   contentHash: text("content_hash").notNull(),
@@ -103,6 +109,7 @@ export const commits = sqliteTable("commits", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  requirementId: text("requirement_id"),
   contractId: text("contract_id")
     .notNull()
     .references(() => contracts.id),
@@ -136,6 +143,7 @@ export const fixTasks = sqliteTable("fix_tasks", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  requirementId: text("requirement_id"),
   sourceRunId: text("source_run_id").notNull(),
   failedAcId: text("failed_ac_id").notNull(),
   expectedBehavior: text("expected_behavior").notNull(),
@@ -155,6 +163,7 @@ export const reflections = sqliteTable("reflections", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  requirementId: text("requirement_id"),
   attemptId: text("attempt_id"),
   nodeName: text("node_name").notNull(),
   criticName: text("critic_name"),
@@ -198,10 +207,61 @@ export const projects = sqliteTable("projects", {
   // 控制平面回归第三刀:项目当前绑定的 HelmCode 标准版本(per-project 版本感知)
   helmcodeVersion: text("helmcode_version"),
   standardsChecksum: text("standards_checksum"),
+  /** 人工确认合并的目标分支(默认 main)。test 通过后停到 pending-confirm,确认时 merge 到此分支。 */
+  mergeBranch: text("merge_branch").notNull().default("main"),
 });
 
 export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectInsert = typeof projects.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// pending_merges — test 通过后"待人工确认合并"的 worktree 快照
+//   orchestrator 在 test-pass 时不再自动 merge,而是写一行到此表 + run 置 pending-confirm,
+//   保留 worktree。前端审 diff 后调 confirm-merge(merge→done) / abort(删 worktree→abandoned)。
+// ---------------------------------------------------------------------------
+export const pendingMerges = sqliteTable("pending_merges", {
+  runId: text("run_id").primaryKey(),
+  cellId: text("cell_id").notNull(),
+  requirementId: text("requirement_id"),
+  projectId: text("project_id").notNull(),
+  sandboxPath: text("sandbox_path").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  branchName: text("branch_name").notNull(),
+  targetBranch: text("target_branch").notNull(),
+  mode: text("mode").notNull(), // "local"(skipDeploy 本地 merge) | "deploy"(跑 deploy 节点出 PR)
+  createdAt: text("created_at").notNull(),
+});
+
+export type PendingMergeRow = typeof pendingMerges.$inferSelect;
+export type PendingMergeInsert = typeof pendingMerges.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// requirements — 需求驱动通路的顶层单元(与矩阵/cell 并存,不维护功能矩阵)。
+//   一个需求 = 一段 clarify 对话(sessionId) + 一份契约(approved 后) + 执行 runs。
+//   需求 owned 的 runs/contracts/... 用 VIRTUAL_CELL_ID 作 cell_id FK 脊柱 +
+//   各表 requirement_id 列标识归属(见 repo.ts WorkUnit)。
+//   status: clarifying | contract-draft | approved | running | done | blocked | abandoned
+//   agentStatus 镜像 cell agentStatus 语义(pending-goal/implementing/...)。
+// ---------------------------------------------------------------------------
+export const requirements = sqliteTable("requirements", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status").notNull().default("clarifying"),
+  agentStatus: text("agent_status").notNull().default("not-started"),
+  /** Claude resume 锚点:首条对话 system.init 写入,后续 message resume 续接 */
+  sessionId: text("session_id"),
+  /** 对话事件追加的长 clarify run(FK→runs) */
+  clarifyRunId: text("clarify_run_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type RequirementRow = typeof requirements.$inferSelect;
+export type RequirementInsert = typeof requirements.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // contract_sync_results — 契约状态同步引擎扫描快照(每次扫描 upsert,幂等)
@@ -276,6 +336,7 @@ export const pipelineQueue = sqliteTable("pipeline_queue", {
   cellId: text("cell_id")
     .notNull()
     .references(() => featureScenarios.id),
+  requirementId: text("requirement_id"),
   contractId: text("contract_id")
     .notNull()
     .references(() => contracts.id),
@@ -292,3 +353,39 @@ export const pipelineQueue = sqliteTable("pipeline_queue", {
 
 export type PipelineQueueRow = typeof pipelineQueue.$inferSelect;
 export type PipelineQueueInsert = typeof pipelineQueue.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// llm_providers — 大模型 provider 配置(API Key 管理)
+//   明文存 apiKey(本机开发场景);isActive 互斥(同时仅一个活跃)。
+//   agent-runner 通过 env sync 使用活跃 provider(见 portal lib/llm-config.ts)。
+// ---------------------------------------------------------------------------
+export const llmProviders = sqliteTable("llm_providers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  apiKey: text("api_key").notNull(),
+  baseUrl: text("base_url").notNull(),
+  model: text("model").notNull().default("glm-5.2[1M]"),
+  isActive: integer("is_active").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type LLMProviderRow = typeof llmProviders.$inferSelect;
+export type LLMProviderInsert = typeof llmProviders.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// runtime_settings — 运行参数(平台一等公民:前端可配,start 路由注入 env,
+// 取代 .env.local 节流 hack)。单例(id='singleton')。
+//   skip_deploy 默认开 → 最短闭环(test 过即 done + merge worktree,绕开 gh/GitLab)。
+//   turns_per_session=0/未设 → runNode 用默认 15/session(不阉割)。
+// ---------------------------------------------------------------------------
+export const runtimeSettings = sqliteTable("runtime_settings", {
+  id: text("id").primaryKey(),
+  skipDeploy: integer("skip_deploy").notNull().default(1),
+  turnsPerSession: integer("turns_per_session").notNull().default(15),
+  turnIntervalMs: integer("turn_interval_ms").notNull().default(0),
+  concurrency: integer("concurrency").notNull().default(1),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type RuntimeSettingsRow = typeof runtimeSettings.$inferSelect;

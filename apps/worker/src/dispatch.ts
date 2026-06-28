@@ -5,13 +5,17 @@
 import {
   type DB,
   claimNextPending,
+  getActiveLLMProvider,
   markQueueDone,
   markQueueTerminal,
   updateCellAgentStatus,
+  updateRequirementAgentStatus,
+  updateRequirementStatus,
   getRunById,
   newRunId,
-  listReflectionsForFeature,
+  listReflectionsForWorkUnit,
   type PipelineQueueRow,
+  type WorkUnit,
 } from "@helmflow/storage";
 import { runOrchestrator, type OrchestratorEvent } from "@helmflow/orchestrator";
 import type { WorkerConfig } from "./env";
@@ -68,7 +72,23 @@ async function launchTask(
   const log = (msg: string): void => console.log(`[worker:${item.id}] ${msg}`);
   log(`claimed contract=${item.contractId} attempt=${item.attempt}/${item.maxAttempts}`);
 
-  updateCellAgentStatus(db, item.cellId, "implementing");
+  // sync DB 活跃 provider 到 env —— 让本轮 runOrchestrator/runNode 用最新 model/key,
+  // 而非 worker 启动时的系统 env。portal 切换 provider 后 worker 立即生效(无需重启)。
+  const activeLlm = getActiveLLMProvider(db);
+  if (activeLlm) {
+    process.env.HELMFLOW_ANTHROPIC_API_KEY = activeLlm.apiKey;
+    process.env.HELMFLOW_ANTHROPIC_BASE_URL = activeLlm.baseUrl;
+    process.env.HELMFLOW_ANTHROPIC_MODEL = activeLlm.model;
+    log(`using active provider: ${activeLlm.name} model=${activeLlm.model}`);
+  }
+
+  // 推进开发状态:requirement-owned → requirement 状态机;cell-owned → cell agentStatus。
+  if (item.requirementId) {
+    updateRequirementAgentStatus(db, item.requirementId, "implementing");
+    updateRequirementStatus(db, item.requirementId, "running");
+  } else {
+    updateCellAgentStatus(db, item.cellId, "implementing");
+  }
 
   // 每次执行用新 superRunId(createRun 以此为主键,无 upsert,不可复用)
   const superRunId = newRunId();
@@ -118,7 +138,11 @@ async function launchTask(
       return;
     }
     // 失败:若由端点限流导致 → 触发全局冷却(暂停后续取任务,等 RPM 恢复)
-    const latest = listReflectionsForFeature(db, item.cellId, 1)[0];
+    // 按 workUnit 查本工作单元的最近反思(需求通路多需求共享虚拟 cellId,不能只按 cellId)。
+    const failWu: WorkUnit = item.requirementId
+      ? { kind: "requirement", requirementId: item.requirementId }
+      : { kind: "cell", cellId: item.cellId };
+    const latest = listReflectionsForWorkUnit(db, failWu, 1)[0];
     const reasonText = latest ? `${latest.failureSummary} ${latest.reflectionText}` : "";
     if (latest && RATE_LIMIT_RE.test(reasonText)) {
       disp.cooldownUntilMs = Date.now() + GLOBAL_COOLDOWN_MS;

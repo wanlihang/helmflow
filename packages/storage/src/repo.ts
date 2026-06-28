@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { DB } from "./db";
 import {
   features,
@@ -12,10 +12,14 @@ import {
   reflections,
   runEvents,
   projects,
+  requirements,
   contractSyncResults,
   contractCellMappings,
   standardsMigrations,
   pipelineQueue,
+  llmProviders,
+  runtimeSettings,
+  pendingMerges,
   type FeatureRow,
   type FeatureScenarioRow,
   type RunRow,
@@ -26,10 +30,15 @@ import {
   type ReflectionRow,
   type RunEventRow,
   type ProjectRow,
+  type RequirementRow,
+  type RequirementInsert,
   type ContractSyncResultRow,
   type ContractCellMappingRow,
   type StandardsMigrationRow,
   type PipelineQueueRow,
+  type LLMProviderRow,
+  type RuntimeSettingsRow,
+  type PendingMergeRow,
 } from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +66,7 @@ export interface UpsertFeatureArgs {
   projectId: string;
   domain: string;
   name: string;
+  description?: string;
   status?: string;
   handler?: string;
   actions?: string;
@@ -94,6 +104,7 @@ export function upsertFeature(db: DB, args: UpsertFeatureArgs): FeatureRow {
     if (args.priority) setValues.priority = args.priority;
     if (args.legacyFlowCode) setValues.legacyFlowCode = args.legacyFlowCode;
     if (args.legacyActivities) setValues.legacyActivities = args.legacyActivities;
+    if (args.description) setValues.description = args.description;
     db.update(features)
       .set(setValues)
       .where(eq(features.id, args.id))
@@ -108,6 +119,7 @@ export function upsertFeature(db: DB, args: UpsertFeatureArgs): FeatureRow {
           projectId: args.projectId,
           domain: args.domain,
           name: args.name,
+          description: args.description ?? "",
           status: args.status ?? null,
           handler: args.handler ?? "",
           actions: args.actions ?? "",
@@ -152,6 +164,7 @@ export interface CreateFeatureManualArgs {
   projectId: string;
   domain: string;
   name: string;
+  description?: string;
   handler?: string;
   actions?: string;
   context?: string;
@@ -175,6 +188,7 @@ export function createFeatureManual(db: DB, args: CreateFeatureManualArgs): Feat
       projectId: args.projectId,
       domain: args.domain,
       name: args.name,
+      description: args.description ?? "",
       status: null,
       handler: args.handler ?? "",
       actions: args.actions ?? "",
@@ -194,6 +208,7 @@ export function createFeatureManual(db: DB, args: CreateFeatureManualArgs): Feat
 
 export interface UpdateFeatureMetaArgs {
   name?: string;
+  description?: string;
   handler?: string;
   actions?: string;
   context?: string;
@@ -208,6 +223,7 @@ export interface UpdateFeatureMetaArgs {
 export function updateFeatureMeta(db: DB, featureId: string, args: UpdateFeatureMetaArgs): FeatureRow {
   const setValues: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (args.name !== undefined) setValues.name = args.name;
+  if (args.description !== undefined) setValues.description = args.description;
   if (args.handler !== undefined) setValues.handler = args.handler;
   if (args.actions !== undefined) setValues.actions = args.actions;
   if (args.context !== undefined) setValues.context = args.context;
@@ -265,6 +281,158 @@ export function archiveFeature(db: DB, featureId: string): FeatureRow {
   return row;
 }
 
+/**
+ * 场景级软归档:设 archived=1(loadMatrix 自动过滤),保留数据可恢复。
+ * 用于 analyze-structure 合并时清理"旧有但本次不再识别"的单个场景。
+ * (与 archiveFeature 不同:本函数不动 scenarioStatus,仅隐藏该场景)
+ */
+export function archiveFeatureScenario(db: DB, featureId: string, scenarioName: string): void {
+  const id = cellId(featureId, scenarioName);
+  db.update(featureScenarios)
+    .set({ archived: 1, updatedAt: new Date().toISOString() })
+    .where(eq(featureScenarios.id, id))
+    .run();
+}
+
+// ---------------------------------------------------------------------------
+// llm_providers — 大模型 provider 配置(API Key 管理)
+//   明文存 apiKey;isActive 互斥。agent-runner 通过 env sync 使用活跃 provider。
+// ---------------------------------------------------------------------------
+
+export interface CreateLLMProviderArgs {
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  model?: string;
+}
+
+export interface UpdateLLMProviderArgs {
+  name?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+export function createLLMProvider(db: DB, args: CreateLLMProviderArgs): LLMProviderRow {
+  const now = new Date().toISOString();
+  const id = `llm-${shortId()}`;
+  db.insert(llmProviders)
+    .values({
+      id,
+      name: args.name,
+      apiKey: args.apiKey,
+      baseUrl: args.baseUrl,
+      model: args.model ?? "glm-5.2[1M]",
+      isActive: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  const row = db.select().from(llmProviders).where(eq(llmProviders.id, id)).get();
+  if (!row) throw new Error(`createLLMProvider: row not found: ${id}`);
+  return row;
+}
+
+export function getLLMProviderById(db: DB, id: string): LLMProviderRow | undefined {
+  return db.select().from(llmProviders).where(eq(llmProviders.id, id)).get();
+}
+
+export function listLLMProviders(db: DB): LLMProviderRow[] {
+  return db.select().from(llmProviders).orderBy(desc(llmProviders.createdAt)).all();
+}
+
+export function updateLLMProvider(
+  db: DB,
+  id: string,
+  args: UpdateLLMProviderArgs,
+): LLMProviderRow {
+  const setValues: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if (args.name !== undefined) setValues.name = args.name;
+  if (args.apiKey !== undefined) setValues.apiKey = args.apiKey;
+  if (args.baseUrl !== undefined) setValues.baseUrl = args.baseUrl;
+  if (args.model !== undefined) setValues.model = args.model;
+  db.update(llmProviders).set(setValues).where(eq(llmProviders.id, id)).run();
+  const row = getLLMProviderById(db, id);
+  if (!row) throw new Error(`updateLLMProvider: row not found: ${id}`);
+  return row;
+}
+
+/** 设为活跃 provider(互斥:先清所有 isActive,再设目标) */
+export function setActiveLLMProvider(db: DB, id: string): LLMProviderRow {
+  const now = new Date().toISOString();
+  db.update(llmProviders).set({ isActive: 0, updatedAt: now }).run();
+  db.update(llmProviders)
+    .set({ isActive: 1, updatedAt: now })
+    .where(eq(llmProviders.id, id))
+    .run();
+  const row = getLLMProviderById(db, id);
+  if (!row) throw new Error(`setActiveLLMProvider: row not found: ${id}`);
+  return row;
+}
+
+export function getActiveLLMProvider(db: DB): LLMProviderRow | undefined {
+  return db.select().from(llmProviders).where(eq(llmProviders.isActive, 1)).get();
+}
+
+export function deleteLLMProvider(db: DB, id: string): void {
+  db.delete(llmProviders).where(eq(llmProviders.id, id)).run();
+}
+
+// ---------------------------------------------------------------------------
+// runtime_settings — 平台运行参数(单例,前端可配,start 路由注入 env)
+// ---------------------------------------------------------------------------
+const RUNTIME_SETTINGS_ID = "singleton";
+
+/** 默认值:getRuntimeSettings 缺省行用此合并(惰性,不写库)。 */
+export const DEFAULT_RUNTIME_SETTINGS = {
+  skipDeploy: 1,
+  turnsPerSession: 15,
+  turnIntervalMs: 0,
+  concurrency: 1,
+} as const;
+
+export interface UpdateRuntimeSettingsArgs {
+  skipDeploy?: number;
+  turnsPerSession?: number;
+  turnIntervalMs?: number;
+  concurrency?: number;
+}
+
+/** 读运行参数;无记录时返回默认(惰性)。 */
+export function getRuntimeSettings(db: DB): RuntimeSettingsRow {
+  const row = db
+    .select()
+    .from(runtimeSettings)
+    .where(eq(runtimeSettings.id, RUNTIME_SETTINGS_ID))
+    .get();
+  if (row) return row;
+  return {
+    id: RUNTIME_SETTINGS_ID,
+    ...DEFAULT_RUNTIME_SETTINGS,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** 更新运行参数(upsert 单例)。 */
+export function updateRuntimeSettings(db: DB, args: UpdateRuntimeSettingsArgs): RuntimeSettingsRow {
+  const now = new Date().toISOString();
+  const current = getRuntimeSettings(db);
+  const next = {
+    skipDeploy: args.skipDeploy ?? current.skipDeploy,
+    turnsPerSession: args.turnsPerSession ?? current.turnsPerSession,
+    turnIntervalMs: args.turnIntervalMs ?? current.turnIntervalMs,
+    concurrency: args.concurrency ?? current.concurrency,
+  };
+  db.insert(runtimeSettings)
+    .values({ id: RUNTIME_SETTINGS_ID, ...next, updatedAt: now })
+    .onConflictDoUpdate({
+      target: runtimeSettings.id,
+      set: { ...next, updatedAt: now },
+    })
+    .run();
+  return getRuntimeSettings(db);
+}
+
 export function listActiveFeatures(db: DB, projectId: string): FeatureRow[] {
   return db
     .select()
@@ -276,6 +444,58 @@ export function listActiveFeatures(db: DB, projectId: string): FeatureRow[] {
       ),
     )
     .all();
+}
+
+// ---------------------------------------------------------------------------
+// 功能点 ID 自动生成:域前缀 + 递增序号(如 D-10、P-08、PR-05)
+//   - 已有该 domain 的功能 → 复用现有 prefix(兼容 mapping→P 等历史不规则映射)
+//   - 新 domain → derivePrefix 多级候选 + 查重,避免与已有前缀冲突
+//   - 序号 = 该 prefix 下所有功能(含 archived)的最大序号 + 1
+//     → 软删除(归档)的功能仍占编号,新建永不回收/冲突
+// ---------------------------------------------------------------------------
+
+const FEATURE_ID_RE = /^([A-Za-z]+)-(\d+)$/;
+
+/** 为全新 domain 推导一个不与 used 冲突的前缀(大写字母)。 */
+function derivePrefix(domain: string, used: Set<string>): string {
+  const base = (domain.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4)) || "F";
+  const candidates = [base[0]!, base.slice(0, 2), base.slice(0, 3), base];
+  for (const c of candidates) {
+    if (c.length > 0 && !used.has(c)) return c;
+  }
+  // 候选全被占用 → 首字母 + 递增数字兜底
+  let i = 1;
+  while (used.has(`${base[0]}${i}`)) i++;
+  return `${base[0]}${i}`;
+}
+
+export function generateFeatureId(db: DB, projectId: string, domain: string): string {
+  const rows = db
+    .select({ id: features.id, domain: features.domain })
+    .from(features)
+    .where(eq(features.projectId, projectId))
+    .all();
+
+  // 收集所有已用前缀(精确匹配 前缀-数字,避免 P 与 PR 互相误匹配)
+  const usedPrefixes = new Set<string>();
+  for (const r of rows) {
+    const m = r.id.match(FEATURE_ID_RE);
+    if (m) usedPrefixes.add(m[1]!);
+  }
+
+  // 该 domain 已有功能 → 复用其现有前缀;否则 derivePrefix
+  const sameDomain = rows.find((r) => r.domain === domain);
+  const existingMatch = sameDomain?.id.match(FEATURE_ID_RE);
+  const prefix = existingMatch ? existingMatch[1]! : derivePrefix(domain, usedPrefixes);
+
+  // 该 prefix 下最大序号(跨所有 domain/状态,含 archived → 归档行占编号不回收)
+  let maxSeq = 0;
+  const seqRe = new RegExp(`^${prefix}-(\\d+)$`);
+  for (const r of rows) {
+    const m = r.id.match(seqRe);
+    if (m) maxSeq = Math.max(maxSeq, Number.parseInt(m[1]!, 10));
+  }
+  return `${prefix}-${String(maxSeq + 1).padStart(2, "0")}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,8 +651,14 @@ export function updateFeatureScenarioStatus(
 // runs — 关联到 cellId
 // ---------------------------------------------------------------------------
 
-export type RunKind = "clarifier" | "coder" | "testgen" | "qa" | "committer" | "full-loop" | "analyze" | "analyze-scan" | "analyze-structure" | "require" | "code" | "test" | "deploy" | "verify" | "contract-sync";
-export type RunState = "running" | "done" | "failed" | "applied";
+export type RunKind = "clarifier" | "coder" | "testgen" | "qa" | "committer" | "full-loop" | "analyze" | "analyze-scan" | "analyze-structure" | "clarify" | "code" | "test" | "deploy" | "verify" | "contract-sync";
+export type RunState =
+  | "running"
+  | "done"
+  | "failed"
+  | "applied"
+  | "pending-confirm" // test 通过,待人工确认合并
+  | "abandoned"; // 人工放弃合并
 
 export function hasRunningRun(db: DB, cellId: string, kind: RunKind): boolean {
   const row = db
@@ -450,7 +676,7 @@ export function hasRunningRun(db: DB, cellId: string, kind: RunKind): boolean {
 // ---------------------------------------------------------------------------
 
 const VIRTUAL_FEATURE_ID = "__system__";
-const VIRTUAL_CELL_ID = "__system____virtual__";
+export const VIRTUAL_CELL_ID = "__system____virtual__";
 
 /**
  * 确保虚拟 feature + cell 存在，并返回虚拟 cellId。
@@ -498,13 +724,41 @@ export function ensureVirtualCell(db: DB): string {
   return VIRTUAL_CELL_ID;
 }
 
-export function createRun(db: DB, cellId: string, kind: RunKind, explicitId?: string): RunRow {
+// ---------------------------------------------------------------------------
+// WorkUnit — 统一"工作单元"判别:cell(矩阵通路)或 requirement(需求驱动通路)。
+//   需求 owned 的 runs/contracts/... 用 VIRTUAL_CELL_ID 作 cell_id FK 脊柱,
+//   归属由各表 requirement_id 列标识。所有按归属查询的地方必须用 WorkUnit 版,
+//   否则多需求共享 VIRTUAL cellId 会串数据(R1)。
+// ---------------------------------------------------------------------------
+export type WorkUnit =
+  | { kind: "cell"; cellId: string }
+  | { kind: "requirement"; requirementId: string };
+
+/** WorkUnit → cell_id 列值(requirement 走虚拟 cell 占位)。 */
+export function cellOf(wu: WorkUnit): string {
+  return wu.kind === "cell" ? wu.cellId : VIRTUAL_CELL_ID;
+}
+
+/** WorkUnit → requirement_id 列值(cell 通路为 null)。 */
+export function requirementIdOf(wu: WorkUnit): string | null {
+  return wu.kind === "requirement" ? wu.requirementId : null;
+}
+
+export function createRun(
+  db: DB,
+  cellId: string,
+  kind: RunKind,
+  explicitId?: string,
+  /** 需求驱动通路:requirement-owned run 填 requirements.id(此时 cellId 应为 VIRTUAL_CELL_ID) */
+  requirementId?: string,
+): RunRow {
   const id = explicitId ?? newRunId();
   const startedAt = new Date().toISOString();
   db.insert(runs)
     .values({
       id,
       cellId,
+      requirementId: requirementId ?? null,
       kind,
       state: "running",
       startedAt,
@@ -519,6 +773,51 @@ export function createRun(db: DB, cellId: string, kind: RunKind, explicitId?: st
 export function updateRun(db: DB, runId: string, state: RunState): void {
   const finishedAt = state === "running" ? null : new Date().toISOString();
   db.update(runs).set({ state, finishedAt }).where(eq(runs.id, runId)).run();
+}
+
+// ---------------------------------------------------------------------------
+// pending_merges — test 通过后"待人工确认合并"的 worktree 快照
+// ---------------------------------------------------------------------------
+
+export interface CreatePendingMergeArgs {
+  runId: string;
+  cellId: string;
+  requirementId?: string | null;
+  projectId: string;
+  sandboxPath: string;
+  worktreePath: string;
+  branchName: string;
+  targetBranch: string;
+  mode: "local" | "deploy";
+}
+
+export function createPendingMerge(db: DB, args: CreatePendingMergeArgs): PendingMergeRow {
+  const createdAt = new Date().toISOString();
+  db.insert(pendingMerges)
+    .values({
+      runId: args.runId,
+      cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
+      projectId: args.projectId,
+      sandboxPath: args.sandboxPath,
+      worktreePath: args.worktreePath,
+      branchName: args.branchName,
+      targetBranch: args.targetBranch,
+      mode: args.mode,
+      createdAt,
+    })
+    .run();
+  const row = getPendingMerge(db, args.runId);
+  if (!row) throw new Error(`createPendingMerge: row not found: ${args.runId}`);
+  return row;
+}
+
+export function getPendingMerge(db: DB, runId: string): PendingMergeRow | undefined {
+  return db.select().from(pendingMerges).where(eq(pendingMerges.runId, runId)).get();
+}
+
+export function deletePendingMerge(db: DB, runId: string): void {
+  db.delete(pendingMerges).where(eq(pendingMerges.runId, runId)).run();
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +890,8 @@ export interface CreateContractArgs {
   projectId?: string;
   /** 目标项目契约绝对路径(helmcode-import 时填,即 markdownPath 的来源) */
   originPath?: string;
+  /** 需求驱动通路:requirement-owned 契约填 requirements.id(此时 cellId 应为 VIRTUAL_CELL_ID) */
+  requirementId?: string;
 }
 
 function newContractId(cellId: string): string {
@@ -604,6 +905,7 @@ export function createContract(db: DB, args: CreateContractArgs): ContractRow {
     .values({
       id,
       cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
       status: args.status,
       markdownPath: args.markdownPath,
       contentHash: args.contentHash,
@@ -628,6 +930,25 @@ export function getLatestContract(db: DB, cellId: string): ContractRow | undefin
     .select()
     .from(contracts)
     .where(eq(contracts.cellId, cellId))
+    .orderBy(desc(contracts.createdAt))
+    .limit(1)
+    .get();
+}
+
+/**
+ * 按 WorkUnit 取最新契约。必须用 requirement_id 维度限定,否则多需求共享
+ * VIRTUAL cellId 会串数据(需求 owned 的契约互取)。
+ */
+export function getLatestContractWorkUnit(db: DB, wu: WorkUnit): ContractRow | undefined {
+  const cellId = cellOf(wu);
+  const reqFilter =
+    wu.kind === "requirement"
+      ? eq(contracts.requirementId, wu.requirementId)
+      : isNull(contracts.requirementId);
+  return db
+    .select()
+    .from(contracts)
+    .where(and(eq(contracts.cellId, cellId), reqFilter))
     .orderBy(desc(contracts.createdAt))
     .limit(1)
     .get();
@@ -662,6 +983,8 @@ export interface CreateCommitArgs {
   committerRunId: string;
   gitSha: string;
   message: string;
+  /** 需求驱动通路:requirement-owned commit 填 requirements.id */
+  requirementId?: string | null;
 }
 
 function newCommitId(): string {
@@ -675,6 +998,7 @@ export function createCommit(db: DB, args: CreateCommitArgs): CommitRow {
     .values({
       id,
       cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
       contractId: args.contractId,
       coderRunId: args.coderRunId ?? null,
       testgenRunId: args.testgenRunId ?? null,
@@ -700,11 +1024,43 @@ export function getLatestCommit(db: DB, cellId: string): CommitRow | undefined {
     .get();
 }
 
+export function getLatestCommitWorkUnit(db: DB, wu: WorkUnit): CommitRow | undefined {
+  const reqFilter =
+    wu.kind === "requirement"
+      ? eq(commits.requirementId, wu.requirementId)
+      : isNull(commits.requirementId);
+  return db
+    .select()
+    .from(commits)
+    .where(and(eq(commits.cellId, cellOf(wu)), reqFilter))
+    .orderBy(desc(commits.createdAt))
+    .limit(1)
+    .get();
+}
+
 export function getLatestRunByKind(db: DB, cellId: string, kind: RunKind): RunRow | undefined {
   return db
     .select()
     .from(runs)
     .where(and(eq(runs.cellId, cellId), eq(runs.kind, kind)))
+    .orderBy(desc(runs.startedAt))
+    .limit(1)
+    .get();
+}
+
+export function getLatestRunByKindWorkUnit(
+  db: DB,
+  wu: WorkUnit,
+  kind: RunKind,
+): RunRow | undefined {
+  const reqFilter =
+    wu.kind === "requirement"
+      ? eq(runs.requirementId, wu.requirementId)
+      : isNull(runs.requirementId);
+  return db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.cellId, cellOf(wu)), reqFilter, eq(runs.kind, kind)))
     .orderBy(desc(runs.startedAt))
     .limit(1)
     .get();
@@ -721,6 +1077,8 @@ export interface CreateFixTaskArgs {
   expectedBehavior: string;
   actualBehavior: string;
   evidence: string;
+  /** 需求驱动通路:requirement-owned fix task 填 requirements.id */
+  requirementId?: string | null;
 }
 
 function newFixTaskId(): string {
@@ -734,6 +1092,7 @@ export function createFixTask(db: DB, args: CreateFixTaskArgs): FixTaskRow {
     .values({
       id,
       cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
       sourceRunId: args.sourceRunId,
       failedAcId: args.failedAcId,
       expectedBehavior: args.expectedBehavior,
@@ -756,6 +1115,19 @@ export function listFixTasks(db: DB, cellId: string): FixTaskRow[] {
     .all();
 }
 
+export function listFixTasksWorkUnit(db: DB, wu: WorkUnit): FixTaskRow[] {
+  const reqFilter =
+    wu.kind === "requirement"
+      ? eq(fixTasks.requirementId, wu.requirementId)
+      : isNull(fixTasks.requirementId);
+  return db
+    .select()
+    .from(fixTasks)
+    .where(and(eq(fixTasks.cellId, cellOf(wu)), reqFilter))
+    .orderBy(desc(fixTasks.createdAt))
+    .all();
+}
+
 // ---------------------------------------------------------------------------
 // reflections — 关联到 cellId
 // ---------------------------------------------------------------------------
@@ -767,6 +1139,8 @@ export interface CreateReflectionArgs {
   criticName?: string | null;
   failureSummary: string;
   reflectionText: string;
+  /** 需求驱动通路:requirement-owned reflection 填 requirements.id */
+  requirementId?: string | null;
 }
 
 function newReflectionId(): string {
@@ -780,6 +1154,7 @@ export function createReflection(db: DB, args: CreateReflectionArgs): Reflection
     .values({
       id,
       cellId: args.cellId,
+      requirementId: args.requirementId ?? null,
       attemptId: args.attemptId ?? null,
       nodeName: args.nodeName,
       criticName: args.criticName ?? null,
@@ -803,6 +1178,131 @@ export function listReflectionsForFeature(db: DB, cellId: string, limit = 5): Re
     .all();
 }
 
+/**
+ * 按 WorkUnit 取最近反思(喂下游 worker prompt)。必须用 requirement_id 维度限定,
+ * 否则多需求共享 VIRTUAL cellId 会串数据(把别的需求的反思喂进来)。
+ */
+export function listReflectionsForWorkUnit(
+  db: DB,
+  wu: WorkUnit,
+  limit = 5,
+): ReflectionRow[] {
+  const reqFilter =
+    wu.kind === "requirement"
+      ? eq(reflections.requirementId, wu.requirementId)
+      : isNull(reflections.requirementId);
+  return db
+    .select()
+    .from(reflections)
+    .where(and(eq(reflections.cellId, cellOf(wu)), reqFilter))
+    .orderBy(desc(reflections.createdAt))
+    .limit(limit)
+    .all();
+}
+
+// ---------------------------------------------------------------------------
+// requirements — 需求驱动通路顶层单元 CRUD(与矩阵/cell 并存,不维护功能矩阵)
+// ---------------------------------------------------------------------------
+
+export type RequirementStatus =
+  | "clarifying"
+  | "contract-draft"
+  | "approved"
+  | "running"
+  | "done"
+  | "blocked"
+  | "abandoned";
+
+/** requirement agentStatus 复用 cell agentStatus 同义状态机字符串 */
+export type RequirementAgentStatus =
+  | "not-started"
+  | "clarifying"
+  | "pending-goal"
+  | "implementing"
+  | "done"
+  | "blocked";
+
+function newRequirementId(): string {
+  return `R-${shortId()}`;
+}
+
+export interface CreateRequirementArgs {
+  projectId: string;
+  title: string;
+  description?: string;
+}
+
+export function createRequirement(db: DB, args: CreateRequirementArgs): RequirementRow {
+  const id = newRequirementId();
+  const now = new Date().toISOString();
+  db.insert(requirements)
+    .values({
+      id,
+      projectId: args.projectId,
+      title: args.title,
+      description: args.description ?? "",
+      status: "clarifying",
+      agentStatus: "not-started",
+      sessionId: null,
+      clarifyRunId: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  const row = db.select().from(requirements).where(eq(requirements.id, id)).get();
+  if (!row) throw new Error(`createRequirement: row not found: ${id}`);
+  return row;
+}
+
+export function getRequirement(db: DB, id: string): RequirementRow | undefined {
+  return db.select().from(requirements).where(eq(requirements.id, id)).get();
+}
+
+export function listRequirementsByProject(db: DB, projectId: string): RequirementRow[] {
+  return db
+    .select()
+    .from(requirements)
+    .where(eq(requirements.projectId, projectId))
+    .orderBy(desc(requirements.updatedAt))
+    .all();
+}
+
+export function updateRequirementStatus(
+  db: DB,
+  id: string,
+  status: RequirementStatus,
+): void {
+  db.update(requirements)
+    .set({ status, updatedAt: new Date().toISOString() })
+    .where(eq(requirements.id, id))
+    .run();
+}
+
+export function updateRequirementAgentStatus(
+  db: DB,
+  id: string,
+  agentStatus: RequirementAgentStatus,
+): void {
+  db.update(requirements)
+    .set({ agentStatus, updatedAt: new Date().toISOString() })
+    .where(eq(requirements.id, id))
+    .run();
+}
+
+export function setRequirementSession(db: DB, id: string, sessionId: string): void {
+  db.update(requirements)
+    .set({ sessionId, updatedAt: new Date().toISOString() })
+    .where(eq(requirements.id, id))
+    .run();
+}
+
+export function setRequirementClarifyRun(db: DB, id: string, runId: string): void {
+  db.update(requirements)
+    .set({ clarifyRunId: runId, updatedAt: new Date().toISOString() })
+    .where(eq(requirements.id, id))
+    .run();
+}
+
 // ---------------------------------------------------------------------------
 // run_events
 // ---------------------------------------------------------------------------
@@ -822,6 +1322,58 @@ export function listRunEvents(db: DB, runId: string, afterId?: number): RunEvent
   return rows;
 }
 
+/**
+ * 仅取节点状态重建所需的结构化事件(node-start/node-done/loop-iteration),按 id 升序。
+ * 避免每次轮询全量加载上千条 node-event —— run 详情页重建 4 节点状态只需这 3 类。
+ */
+const STRUCTURAL_EVENT_TYPES = ["node-start", "node-done", "loop-iteration"] as const;
+export function listStructuralRunEvents(db: DB, runId: string): RunEventRow[] {
+  return db
+    .select()
+    .from(runEvents)
+    .where(and(eq(runEvents.runId, runId), inArray(runEvents.eventType, [...STRUCTURAL_EVENT_TYPES])))
+    .orderBy(asc(runEvents.id))
+    .all();
+}
+
+export interface RequireInputSummary {
+  runId: string;
+  userRequest: string;
+  startedAt: string;
+}
+
+/**
+ * 取该 cell 最近一次 clarify run 里最后一条 require-input 事件的用户原始需求。
+ * require-input 仅由 POST /api/clarify 写入,正是用户在「启动需求」输入的原文。
+ * 用于场景详情页常驻展示需求描述(关闭启动弹窗后仍可见)。
+ */
+export function getLatestRequireInput(db: DB, cellId: string): RequireInputSummary | null {
+  const clarifyRuns = db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.cellId, cellId), eq(runs.kind, "clarify")))
+    .orderBy(desc(runs.startedAt))
+    .all();
+  for (const r of clarifyRuns) {
+    const events = listRunEvents(db, r.id);
+    let userRequest = "";
+    for (const ev of events) {
+      try {
+        const p = JSON.parse(ev.payload) as { type?: string; userRequest?: string };
+        if (p.type === "require-input" && typeof p.userRequest === "string") {
+          userRequest = p.userRequest;
+        }
+      } catch {
+        /* skip malformed payload */
+      }
+    }
+    if (userRequest.length > 0) {
+      return { runId: r.id, userRequest, startedAt: r.startedAt };
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // pipeline_queue — 常驻 worker 执行队列(7×24 自主开发)
 //   approved 契约 → pending 项;worker 认领 pending→running;执行后 done/blocked。
@@ -836,6 +1388,8 @@ export interface EnqueueArgs {
   contractId: string;
   priority?: number;
   maxAttempts?: number;
+  /** 需求驱动通路:requirement-owned 队列项填 requirements.id */
+  requirementId?: string;
 }
 
 function newQueueItemId(cellId: string): string {
@@ -843,8 +1397,9 @@ function newQueueItemId(cellId: string): string {
 }
 
 /**
- * 入队:若该 cell 已有 pending/running 队列项则跳过(返回 null),否则插入 pending。
- * 事务内检查,保证同一 cell 不会被重复入队。
+ * 入队:若该 contract 已有 pending/running/blocked/failed 队列项则跳过(返回 null),否则插入 pending。
+ * 事务内检查,保证同一 contract 不会被重复入队。
+ * 去重按 contractId(非 cellId)——需求通路多需求共享 VIRTUAL cellId,按 cell 去重会互相挡。
  */
 export function enqueueIfAbsent(db: DB, args: EnqueueArgs): PipelineQueueRow | null {
   return db.transaction((tx) => {
@@ -853,9 +1408,9 @@ export function enqueueIfAbsent(db: DB, args: EnqueueArgs): PipelineQueueRow | n
       .from(pipelineQueue)
       .where(
         and(
-          eq(pipelineQueue.cellId, args.cellId),
+          eq(pipelineQueue.contractId, args.contractId),
           // pending/running=进行中;blocked/failed=已失败待人工。任一存在都不重新入队,
-          // 否则业务失败的 cell 会被 scan 无限重新入队 → 死循环空转。
+          // 否则业务失败的 contract 会被 scan 无限重新入队 → 死循环空转。
           inArray(pipelineQueue.state, ["pending", "running", "blocked", "failed"]),
         ),
       )
@@ -868,6 +1423,7 @@ export function enqueueIfAbsent(db: DB, args: EnqueueArgs): PipelineQueueRow | n
       .values({
         id,
         cellId: args.cellId,
+        requirementId: args.requirementId ?? null,
         contractId: args.contractId,
         state: "pending",
         priority: args.priority ?? 0,
@@ -1102,6 +1658,7 @@ export interface UpdateProjectArgs {
   featureMatrixPath?: string;
   repoUrl?: string | null;
   description?: string | null;
+  mergeBranch?: string;
 }
 
 export function updateProject(db: DB, id: string, args: UpdateProjectArgs): ProjectRow {
@@ -1113,6 +1670,7 @@ export function updateProject(db: DB, id: string, args: UpdateProjectArgs): Proj
   if (args.featureMatrixPath !== undefined) setValues.featureMatrixPath = args.featureMatrixPath;
   if (args.repoUrl !== undefined) setValues.repoUrl = args.repoUrl;
   if (args.description !== undefined) setValues.description = args.description;
+  if (args.mergeBranch !== undefined) setValues.mergeBranch = args.mergeBranch;
   if (Object.keys(setValues).length > 0) {
     db.update(projects).set(setValues).where(eq(projects.id, id)).run();
   }

@@ -1,4 +1,4 @@
-// 需求节点 — 加载 HelmCode core/clarify skill,产出行为契约。
+// clarify(需求澄清)节点 — 加载 HelmCode core/clarify skill,产出行为契约。
 // 输入:用户自然语言需求 + Feature 元数据
 // 输出:行为契约 (含 domain model / schema changes / compatibility)
 // 失败时 failReason="spec-rejected"
@@ -6,9 +6,11 @@
 import type { Contract } from "@helmflow/contract-schema";
 import { HelmcodeManager } from "@helmflow/helmcode-manager";
 import {
+  classifyError,
   runNode,
   type NodeRunEvent,
 } from "@helmflow/agent-runner";
+import { mapFailReason } from "./fail-reason";
 import {
   createAttempt,
   createRun,
@@ -20,12 +22,15 @@ import {
 import type { NodeRunnerResult } from "../types";
 import { buildReflectionAppendix } from "../prompt-builder";
 
-// 适度收紧:降低单 run 内密集请求,减少撞端点 RPM/TPM 的概率(配合 worker 限流退避)
-const MAX_TURNS = 15;
+// 不限制 turn:agent 跑到自然完成(stop),不被 turn 上限打断。
+// maxTurns = maxTurnsPerSession = 最大值 → 单 session 跑满,不切碎、不续接。
+const MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
-interface RunRequireNodeArgs {
+interface RunClarifyNodeArgs {
   db: DB;
   cellId: string;
+  /** 需求驱动通路:requirement-owned 时填 requirementId(cellId 为虚拟 cell) */
+  requirementId?: string | null;
   featureName: string;
   domainId: string;
   contract: Contract;
@@ -37,14 +42,14 @@ interface RunRequireNodeArgs {
   onEvent?: (event: NodeRunEvent) => void;
 }
 
-export async function runRequireNode(args: RunRequireNodeArgs): Promise<NodeRunnerResult> {
+export async function runClarifyNode(args: RunClarifyNodeArgs): Promise<NodeRunnerResult> {
   const manager = args.helmcodeRoot ? new HelmcodeManager({ helmcodeRoot: args.helmcodeRoot, preset: "java-ddd" }) : undefined;
   const versionInfo = manager?.getVersion();
   const systemPrompt = manager ? manager.loadSkillBody("clarify") : "";
   const additionalDirs = manager ? manager.resolveSkillAdditionalDirs("clarify") : [];
 
-  const run = createRun(args.db, args.cellId, "require");
-  const attempt = createAttempt(args.db, run.id, "require", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
+  const run = createRun(args.db, args.cellId, "clarify", undefined, args.requirementId ?? undefined);
+  const attempt = createAttempt(args.db, run.id, "clarify", args.iteration, "running", versionInfo ? { version: versionInfo.helmcode, checksum: versionInfo.checksum } : undefined);
 
   const reflectionAppendix = buildReflectionAppendix(args.reflections ?? []);
 
@@ -89,6 +94,7 @@ ${reflectionAppendix}
       userPrompt,
       allowedTools: ["Read", "Bash", "Glob", "Grep"],
       maxTurns: MAX_TURNS,
+      maxTurnsPerSession: MAX_TURNS,
       additionalDirectories: additionalDirs.length > 0 ? additionalDirs : undefined,
       onEvent: args.onEvent,
     });
@@ -100,7 +106,7 @@ ${reflectionAppendix}
     return {
       success: nodeResult.success,
       runId: run.id,
-      failReason: nodeResult.success ? undefined : "spec-rejected",
+      failReason: mapFailReason(nodeResult.success, nodeResult.errorKind, "spec-rejected"),
       issues: nodeResult.success ? undefined : [{ check: "clarify-failed", detail: nodeResult.error ?? "require node failed" }],
       turns: nodeResult.turns,
       durationMs: nodeResult.durationMs,
@@ -113,7 +119,7 @@ ${reflectionAppendix}
     return {
       success: false,
       runId: run.id,
-      failReason: "spec-rejected",
+      failReason: classifyError(message) === "transient-infra" ? "infra-error" : "spec-rejected",
       issues: [{ check: "require-exception", detail: message }],
     };
   }

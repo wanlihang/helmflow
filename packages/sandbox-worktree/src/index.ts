@@ -71,18 +71,42 @@ export function mergeWorktreeIntoMain(args: {
   worktreePath: string;
   sandboxPath: string;
   branchName: string;
+  /** 合并到的目标分支;不传则并到 sandbox 当前检出分支(旧行为)。 */
+  targetBranch?: string;
 }): void {
-  const { sandboxPath, branchName } = args;
+  const { sandboxPath, branchName, targetBranch } = args;
+  const git = (sub: string[]): string =>
+    execFileSync("git", sub, { cwd: sandboxPath, encoding: "utf-8" });
+
+  // 若指定目标分支且 sandbox 当前不在其上,先 checkout 到目标分支再合并(合并完回切原分支)。
+  // 目标分支不存在(如默认 main 但仓库用别的分支名)或工作区脏无法 checkout → 优雅回退:
+  // 并到 sandbox 当前检出分支(旧行为),而非直接失败。
+  let prevBranch: string | null = null;
+  if (targetBranch) {
+    const cur = git(["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+    if (cur !== targetBranch) {
+      try {
+        git(["checkout", targetBranch]);
+        prevBranch = cur;
+      } catch {
+        // 目标分支不存在/工作区脏:保持当前分支,prevBranch=null(不回切),并到当前分支
+        prevBranch = null;
+      }
+    }
+  }
+
   try {
-    execFileSync("git", ["merge", "--ff-only", branchName], {
-      cwd: sandboxPath,
-      encoding: "utf-8",
-    });
+    git(["merge", "--ff-only", branchName]);
   } catch {
-    execFileSync("git", ["merge", "--no-edit", branchName], {
-      cwd: sandboxPath,
-      encoding: "utf-8",
-    });
+    git(["merge", "--no-edit", branchName]);
+  } finally {
+    if (prevBranch) {
+      try {
+        git(["checkout", prevBranch]);
+      } catch {
+        // 合并后工作区残留(如冲突)无法回切,留在目标分支由人工处理
+      }
+    }
   }
 }
 
