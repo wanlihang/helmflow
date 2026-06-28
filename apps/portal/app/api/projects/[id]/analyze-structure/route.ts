@@ -1,16 +1,6 @@
 import { getDb } from "@/lib/db";
 import { resolveSandboxPathForProject, sseEncode, sseResponse } from "@/lib/server-utils";
-import {
-  type ScannedClass,
-  type ScannedHandler,
-  type StructureAnalysisResult,
-  buildInferPrompt,
-  buildScanPrompt,
-  parseHandlerOutput,
-  parseInventoryOutput,
-  parseStructureResult,
-} from "@/lib/structure-analyzer";
-import { runClassify, runNode } from "@helmflow/agent-runner";
+import { type StructureAnalysisResult, analyzeProjectStructure } from "@/lib/structure-analyzer";
 import {
   createRun,
   createRunEvent,
@@ -189,100 +179,28 @@ async function runStructureAnalysis(
     phase: "scan",
   });
 
-  // ---- Phase 1: Agent 扫描代码库 ----
-  const collectedText: string[] = [];
-
   try {
-    const scanResult = await runNode({
-      cwd: sandboxPath,
-      systemPrompt:
-        "You are a Java code structure scanner. Scan all Java source files thoroughly and produce a complete inventory. Use Glob to find all .java files (pattern: **/src/main/java/**/*.java or **/*.java). Read every file found — do not stop early. Handle both single-module and multi-module (e.g. app/bootstrap/src, app/domain/src) Maven projects.",
-      userPrompt: buildScanPrompt(),
-      allowedTools: ["Read", "Bash", "Glob", "Grep"],
-      maxTurns: 20,
-      onEvent: (event) => {
-        if (event.type === "assistant.text") {
-          collectedText.push(event.text);
-          sse({ type: "token", text: event.text });
-        } else if (event.type === "tool_use") {
-          sse({ type: "tool_use", name: event.name, input: event.input });
-        } else if (event.type === "tool_result") {
-          sse({
-            type: "tool_result",
-            isError: event.isError,
-            preview: event.preview,
-          });
-        }
-      },
-    });
-
-    if (!scanResult.success) {
-      updateRun(db, runId, "failed");
-      sse({ type: "error", message: scanResult.error ?? "Scan phase failed" });
-      return;
-    }
-
-    const fullText = collectedText.join("");
-    const inventory = parseInventoryOutput(fullText);
-    const handlers = parseHandlerOutput(fullText);
+    // 确定性提取标准结构: BizScene × 各域 Feature enum × DefaultXxxDecider 网格
+    // (与代码 1:1, 不再依赖 LLM 推断业务维度)
+    const result = await analyzeProjectStructure(sandboxPath);
 
     sse({
       type: "scan-done",
-      inventorySize: inventory.length,
-      handlerCount: handlers.length,
-      scanDurationMs: scanResult.durationMs,
+      totalDomains: result.scanSummary.totalDomains,
+      totalFeatures: result.scanSummary.totalFeatures,
+      totalScenes: result.scanSummary.totalScenes,
+      scanDurationMs: result.scanSummary.durationMs,
+      // 兼容旧前端日志文案(显示为功能点数)
+      inventorySize: result.scanSummary.totalFeatures,
+      handlerCount: result.scanSummary.totalFeatures,
     });
-
-    // ---- Phase 2: 推断域 / 功能点 / 场景 ----
-    if (inventory.length === 0 && handlers.length === 0) {
-      updateRun(db, runId, "failed");
-      sse({
-        type: "error",
-        message: "扫描结果为空，无法推断项目结构",
-      });
-      return;
-    }
-
-    sse({
-      type: "structure-infer-start",
-      inventorySize: inventory.length,
-      handlerCount: handlers.length,
-    });
-
-    const classifyResult = await runClassify({
-      cwd: sandboxPath,
-      systemPrompt:
-        "You are a DDD architecture analyst. Based on the code inventory and handler analysis, infer the domain structure, feature points, and business scenarios of a Java DDD project. Output ONLY the JSON wrapped in XML tags, nothing else.",
-      userPrompt: buildInferPrompt(inventory, handlers),
-      maxTokens: 8192,
-    });
-
-    const structureResult = parseStructureResult(classifyResult.text);
-
-    if (!structureResult) {
-      updateRun(db, runId, "failed");
-      sse({
-        type: "error",
-        message: "结构推断解析失败，无法识别有效的项目结构",
-      });
-      return;
-    }
-
-    // 补充 summary
-    structureResult.scanSummary = {
-      totalHandlers: handlers.length,
-      totalActions: inventory.filter((c) => c.type === "action").length,
-      totalDomains: structureResult.domains.length,
-      scanDurationMs: scanResult.durationMs,
-      classifyDurationMs: classifyResult.durationMs,
-    };
 
     updateRun(db, runId, "done");
     sse({
       type: "structure-done",
-      result: structureResult,
-      scanDurationMs: scanResult.durationMs,
-      classifyDurationMs: classifyResult.durationMs,
+      result,
+      scanDurationMs: result.scanSummary.durationMs,
+      classifyDurationMs: 0,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

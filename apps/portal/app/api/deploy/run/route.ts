@@ -178,8 +178,8 @@ export async function POST(req: Request): Promise<Response> {
   const contractMarkdownPath = resolve(process.cwd(), contract.markdownPath);
   const contractMarkdown = readFileSync(contractMarkdownPath, "utf-8");
 
-  // Parse AC IDs from contract
-  const acMatch = [...contractMarkdown.matchAll(/AC-\d{3}/g)].map((m) => m[0]);
+  // Parse AC IDs from contract(对齐 contract-schema 的 AC-\d{1,3},兼容 1-3 位 AC)
+  const acMatch = [...contractMarkdown.matchAll(/AC-\d{1,3}/g)].map((m) => m[0]);
   const acIds = [...new Set(acMatch)].join(", ");
 
   const userPrompt = `## 上线任务

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { getDb } from "@/lib/db";
+import { classifyCell } from "@/lib/status-classifier";
 import { type Feature, type Scenario, getFeature, loadMatrix } from "@/lib/matrix";
 import { getCurrentProjectId } from "@/lib/project";
 import { isString, resolveSandboxPath, sseEncode, sseResponse } from "@/lib/server-utils";
@@ -43,14 +44,29 @@ interface AnalysisResult {
   newStatus: string;
   reason: string;
   implementation?: { decider?: string; acceptor?: string; handler?: string; actions?: string[] };
+  /** true=确定性判定(未走 LLM);false/undefined=LLM 验证契约产出 */
+  deterministic?: boolean;
+  /** D 组合(完整+有契约)时,契约 BR/AC 逐条落地情况 */
+  contractCheck?: ContractCheck;
 }
 
 /** LLM 分析输出(parseAnalysisOutput 解析) */
+interface ContractCheckItem {
+  id: string;
+  landed: boolean;
+  note?: string;
+}
+interface ContractCheck {
+  rules: ContractCheckItem[];
+  criteria: ContractCheckItem[];
+}
 interface AnalysisOutput {
   cellId: string;
   newStatus: string;
   reason: string;
   implementation?: { decider?: string; acceptor?: string; handler?: string; actions?: string[] };
+  /** D 组合(完整+有契约)时,LLM 逐条验证契约 BR/AC 落地情况 */
+  contractCheck?: ContractCheck;
 }
 
 // InventoryItem 类型从 @helmflow/adapter-java-ddd 导入(scanJavaInventory 产出)
@@ -611,8 +627,8 @@ async function runBulkAnalysis(
     return;
   }
 
-  // ---- Phase 2: per-cell classify(拆分!每 cell 独立 run,故障隔离) ----
-  sse({ type: "classify-start", cellCount: cellsToAnalyze.length, perCell: true });
+  // ---- Phase 2: 确定性分类(A/B/C/E/F 跳过 LLM) + LLM 契约验证(D/unknown) ----
+  sse({ type: "classify-start", cellCount: cellsToAnalyze.length, perCell: true, deterministic: true });
   const allResults: AnalysisResult[] = [];
   const classifySystemPrompt =
     "You are a precise status classifier. 优先对照该 cell 的行为契约判断:用契约的 BR/AC 作为「实现该满足什么」的权威,在 inventory(代码清单)中逐条验证是否落地;契约指定的分层(Decider/Acceptor/Handler/Action)为权威归属,在 inventory 中确认其存在与逻辑完整性(无 TODO、非骨架)。状态:契约 BR/AC 全部落地且分层完整→已支持;部分缺失或骨架→需改造;关键类缺失→待实现;currentStatus 为废弃→保持废弃。无契约时回退纯 inventory 语义匹配。输出仍为 <ANALYSIS_RESULT> 标签包裹的 JSON 数组,只输出该数组。";
@@ -647,14 +663,8 @@ async function runBulkAnalysis(
   for (let cellIdx = 0; cellIdx < cellsToAnalyze.length; cellIdx++) {
     const cell = cellsToAnalyze[cellIdx];
 
-    // cell 间限速(非首个 cell 前等 2s,避免密集触发 GLM 限流)
-    if (cellIdx > 0) {
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-
     // 每 cell 独立 analyze run(真实 cellId,运行中心逐 cell 可观测)
     let cellRun: { id: string } | null = null;
-    // per-cell sse:事件双写(主 run + per-cell run,这样运行中心点 per-cell 也能看内容)
     const cellSse = (payload: unknown) => {
       sse(payload); // 写到主 run(总览用)
       if (cellRun) {
@@ -665,63 +675,99 @@ async function runBulkAnalysis(
         }
       }
     };
+
     try {
       cellRun = createRun(db, cell.cellId, "analyze");
+
+      // 2a: 确定性分类(代码×契约矩阵)
+      const handlerHint = cell.feature.implementation.handler;
+      const hasContract = Boolean(getLatestContract(db, cell.cellId));
+      const classified = classifyCell(inventory, handlerHint, hasContract);
+
       cellSse({
         type: "classify-cell-start",
         cellId: cell.cellId,
         runId: cellRun.id,
         progress: `${cellIdx + 1}/${cellsToAnalyze.length}`,
+        codeState: classified.codeState,
+        deterministic: !classified.needsLLM,
       });
 
-      // 读取该 cell 的行为契约(若已建立映射),作为 classify 的权威依据注入 prompt
-      const contracts = new Map<string, string>();
-      const contractMd = loadContractMd(db, cell.cellId);
-      if (contractMd) contracts.set(cell.cellId, contractMd);
+      let result: AnalysisResult | null = null;
 
-      const classifyResult = await runClassifyWithRetry(
-        {
-          cwd: sandboxPath,
-          systemPrompt: classifySystemPrompt,
-          userPrompt: buildClassifyPrompt(inventory, [cell], contracts),
-        },
-        cellSse,
-      );
-      const parsed = parseAnalysisOutput(classifyResult.text);
-
-      // 写回分层归属(独立于状态变更)
-      for (const item of parsed) {
-        if (!item.implementation) continue;
+      if (!classified.needsLLM) {
+        // A/B/C/E/F: 确定性结果,跳过 LLM(秒级)
         updateFeatureImplementation(db, cell.feature.id, {
-          decider: item.implementation.decider ?? "",
-          acceptor: item.implementation.acceptor ?? "",
-          handler: item.implementation.handler ?? "",
-          actions: item.implementation.actions ? JSON.stringify(item.implementation.actions) : "",
+          decider: classified.implementation.decider ?? "",
+          acceptor: classified.implementation.acceptor ?? "",
+          handler: classified.implementation.handler ?? "",
+          actions: classified.implementation.actions
+            ? JSON.stringify(classified.implementation.actions)
+            : "",
         });
+        result = {
+          cellId: cell.cellId,
+          featureId: cell.feature.id,
+          scenarioName: cell.scenario.name,
+          oldStatus: cell.scenario.status,
+          newStatus: classified.status,
+          reason: classified.reason,
+          implementation: classified.implementation,
+          deterministic: true,
+        };
+      } else {
+        // D(完整+有契约) / unknown: LLM 验证契约 BR/AC
+        if (cellIdx > 0) {
+          await new Promise((r) => setTimeout(r, 2000)); // 限速,避免 GLM 529
+        }
+        const contracts = new Map<string, string>();
+        const contractMd = loadContractMd(db, cell.cellId);
+        if (contractMd) contracts.set(cell.cellId, contractMd);
+        const classifyResult = await runClassifyWithRetry(
+          {
+            cwd: sandboxPath,
+            systemPrompt: classifySystemPrompt,
+            userPrompt: buildClassifyPrompt(inventory, [cell], contracts),
+          },
+          cellSse,
+        );
+        const parsed = parseAnalysisOutput(classifyResult.text);
+        for (const item of parsed) {
+          if (!item.implementation) continue;
+          updateFeatureImplementation(db, cell.feature.id, {
+            decider: item.implementation.decider ?? "",
+            acceptor: item.implementation.acceptor ?? "",
+            handler: item.implementation.handler ?? "",
+            actions: item.implementation.actions
+              ? JSON.stringify(item.implementation.actions)
+              : "",
+          });
+        }
+        const results = buildAnalysisResults(parsed, [cell]);
+        result = results[0] ?? null;
       }
-
-      const results = buildAnalysisResults(parsed, [cell]);
 
       // apply 状态变更
-      for (const r of results) {
-        const existing = getCellRow(db, r.cellId);
-        if (!existing) continue;
-        updateFeatureScenarioStatus(db, r.featureId, r.scenarioName, r.newStatus);
-        if (
-          existing.scenarioStatus === "已支持" &&
-          (r.newStatus === "需改造" || r.newStatus === "待实现")
-        ) {
-          updateCellAgentStatus(db, r.cellId, "not-started");
+      if (result && result.oldStatus !== result.newStatus) {
+        const existing = getCellRow(db, result.cellId);
+        if (existing) {
+          updateFeatureScenarioStatus(db, result.featureId, result.scenarioName, result.newStatus);
+          if (
+            existing.scenarioStatus === "已支持" &&
+            (result.newStatus === "需改造" || result.newStatus === "待实现")
+          ) {
+            updateCellAgentStatus(db, result.cellId, "not-started");
+          }
         }
+        allResults.push(result);
       }
-      allResults.push(...results);
       updateRun(db, cellRun.id, "done");
       cellSse({
         type: "classify-cell-done",
         cellId: cell.cellId,
         runId: cellRun.id,
-        results,
-        durationMs: classifyResult.durationMs,
+        results: result && result.oldStatus !== result.newStatus ? [result] : [],
+        deterministic: result?.deterministic ?? false,
       });
     } catch (err) {
       // 单 cell 失败不影响其他 cell(故障隔离)

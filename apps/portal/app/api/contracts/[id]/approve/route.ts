@@ -1,9 +1,13 @@
 import { getDb } from "@/lib/db";
+import { rewriteContractMdStatus } from "@/lib/contract-md";
 import {
   getContractById,
   getLatestContract,
+  getLatestContractWorkUnit,
   updateCellAgentStatus,
   updateContractStatus,
+  updateRequirementAgentStatus,
+  updateRequirementStatus,
 } from "@helmflow/storage";
 import { NextResponse } from "next/server";
 
@@ -14,6 +18,9 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+// POST /api/contracts/[id]/approve — 批准契约:draft → approved。
+// 最新契约 approve 后 cell agent status 推进 pending-goal(可进 Act 执行);
+// md 文件 status 回写(共享 contract-md),best-effort。
 export async function POST(_req: Request, ctx: RouteContext): Promise<Response> {
   const { id } = await ctx.params;
   if (!id || id.length === 0) {
@@ -32,18 +39,41 @@ export async function POST(_req: Request, ctx: RouteContext): Promise<Response> 
     );
   }
 
-  const latest = getLatestContract(db, contract.cellId);
-  const isLatest = latest?.id === contract.id;
-
   const updated = updateContractStatus(db, id, "approved");
-  if (isLatest) {
-    updateCellAgentStatus(db, contract.cellId, "pending-goal");
+
+  // 需求驱动通路(requirement-owned):更新 requirement 状态,不碰 cellStatus(虚拟 cell)。
+  // 矩阵通路(cell-owned):原逻辑,推进 cell agentStatus。
+  let isLatest = false;
+  let owner: "requirement" | "cell" = "cell";
+  if (contract.requirementId) {
+    owner = "requirement";
+    const latest = getLatestContractWorkUnit(db, {
+      kind: "requirement",
+      requirementId: contract.requirementId,
+    });
+    isLatest = latest?.id === contract.id;
+    if (isLatest) {
+      updateRequirementStatus(db, contract.requirementId, "approved");
+      updateRequirementAgentStatus(db, contract.requirementId, "pending-goal");
+    }
+  } else {
+    const latest = getLatestContract(db, contract.cellId);
+    isLatest = latest?.id === contract.id;
+    if (isLatest) {
+      updateCellAgentStatus(db, contract.cellId, "pending-goal");
+    }
   }
+
+  // 回写 md 文件 status(共享 contract-md),best-effort
+  const mdRewritten = rewriteContractMdStatus(contract.markdownPath, "approved");
 
   return NextResponse.json({
     contract: updated,
+    mdRewritten,
     note: isLatest
-      ? "Latest contract approved; cell agent status advanced to pending-goal."
-      : "Historical draft approved; cell agent status unchanged.",
+      ? owner === "requirement"
+        ? "Latest requirement contract approved; requirement status advanced to approved/pending-goal."
+        : "Latest contract approved; cell agent status advanced to pending-goal."
+      : "Historical draft approved; owner status unchanged.",
   });
 }

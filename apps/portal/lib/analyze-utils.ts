@@ -6,6 +6,17 @@ import { useRef, useState } from "react";
 
 const EMOJI_LINE_RE = /^[📋📂⚡🔧⚠️✅❌⏱▶]/u;
 
+export interface ContractCheckItem {
+  id: string;
+  landed: boolean;
+  note?: string;
+}
+
+export interface ContractCheck {
+  rules: ContractCheckItem[];
+  criteria: ContractCheckItem[];
+}
+
 export interface AnalysisResult {
   cellId: string;
   featureId: string;
@@ -13,6 +24,10 @@ export interface AnalysisResult {
   oldStatus: string;
   newStatus: string;
   reason: string;
+  /** true=确定性判定(代码×契约矩阵,未走 LLM);false/undefined=LLM 契约验证 */
+  deterministic?: boolean;
+  /** 有契约且走 LLM 验证(D 组合)时,逐条 BR/AC 落地情况 */
+  contractCheck?: ContractCheck;
 }
 
 export interface DbEvent {

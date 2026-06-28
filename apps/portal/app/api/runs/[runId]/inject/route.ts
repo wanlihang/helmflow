@@ -1,8 +1,8 @@
+import { existsSync } from "node:fs";
 import { getDb } from "@/lib/db";
-import { getCurrentProjectId } from "@/lib/project";
 import { resolveSandboxPath } from "@/lib/server-utils";
 import { runNode } from "@helmflow/agent-runner";
-import { createRun, createRunEvent, getRunById, updateRun } from "@helmflow/storage";
+import { createRun, createRunEvent, getRunById, listRunEvents, updateRun } from "@helmflow/storage";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -38,35 +38,63 @@ export async function POST(
       return NextResponse.json({ error: "Run not found" }, { status: 404 });
     }
 
-    // 从原 run 的 system.init 事件获取 sessionId
-    // (当前 sessionId 在 run_events 的 system.init payload 里)
-    // 如果找不到 sessionId,返回提示(无法 resume)
-    const projectId = await getCurrentProjectId();
     const sandboxPath = await resolveSandboxPath();
 
+    // 从原 run 的 system.init 事件拿 sessionId,用于 resume 续接(SDK 0.3.162 支持 resume)
+    const origEvents = listRunEvents(db, originalRun.id);
+    let sessionId: string | null = null;
+    for (const ev of origEvents) {
+      try {
+        const p = JSON.parse(ev.payload);
+        // system.init 在 node-event 的 event 字段里(orchestrator 包装),也可能顶层;两种都查
+        const inner = p.event && typeof p.event === "object" ? p.event : p;
+        if (inner.type === "system.init" && typeof inner.sessionId === "string" && inner.sessionId) {
+          sessionId = inner.sessionId;
+          break;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // resume session 按 cwd 索引(~/.claude/projects/<cwd-hash>/<sessionId>.jsonl),cwd 必须是
+    // 原 session 的 worktree,否则 "No conversation found"。从 worktree-created 拿原 worktree;
+    // worktree 已清理则退回 sandboxPath(resume 会自然失败 → 走新 session)。
+    let worktreePath: string | null = null;
+    for (const ev of origEvents) {
+      try {
+        const p = JSON.parse(ev.payload);
+        if (p.type === "worktree-created" && typeof p.worktreePath === "string") {
+          worktreePath = p.worktreePath;
+          break;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const resumeCwd = worktreePath && existsSync(worktreePath) ? worktreePath : sandboxPath;
+
     // 创建新 run(注入续接)
-    const injectRun = createRun(db, originalRun.cellId, "analyze"); // 用 analyze kind(轻量)
+    const injectRun = createRun(db, originalRun.cellId, "analyze");
 
     createRunEvent(db, injectRun.id, "agent.input", {
       type: "agent.input",
-      systemPrompt: "(人工注入续接)",
+      systemPrompt: sessionId ? "(resume 续接原 session)" : "(新 session,原 run 无 sessionId)",
       userPrompt: message,
     });
 
-    // 在后台异步执行(不阻塞响应)
-    // 注意:这里用 runNode 发新 prompt,Claude Agent SDK 会用 cwd 环境运行
-    // 真正的 session resume 需要 sessionId,但当前 Claude Agent SDK 的 query()
-    // 不直接暴露 resume 参数。作为 MVP,这里以新 session 发送用户消息。
-    // TODO: 后续用 SDK 的 resume 能力实现真正的上下文续接。
+    // 后台异步:resume 续接原 session(用户可输 /clarify /goal,被 claude_code preset 识别)。
+    // 有 sessionId → resume 续上下文;无 → 退回新 session(preset 仍支持 /命令)。
+    const resumeSessionId = sessionId ?? undefined;
     (async () => {
       try {
         const result = await runNode({
-          cwd: sandboxPath,
-          systemPrompt:
-            "你是 HelmFlow 的人工干预助手。用户对正在进行的任务有补充信息,请基于用户输入继续协助。",
-          userPrompt: `用户补充信息:\n${message}`,
-          allowedTools: ["Read", "Bash", "Grep", "Glob"],
-          maxTurns: 10,
+          cwd: resumeCwd,
+          resumeSessionId,
+          systemPrompt: "",
+          userPrompt: message,
+          allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+          maxTurns: 500,
           onEvent: (event) => {
             try {
               if (event.type === "assistant.text") {

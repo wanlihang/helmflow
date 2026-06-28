@@ -49,6 +49,7 @@ export async function PATCH(req: Request, ctx: RouteContext): Promise<Response> 
   // ID 不可改,忽略 body.id
   const updateArgs: Record<string, string> = {};
   if (typeof body.name === "string" && body.name.trim()) updateArgs.name = body.name.trim();
+  if (typeof body.description === "string") updateArgs.description = body.description;
   if (typeof body.handler === "string") updateArgs.handler = body.handler;
   if (typeof body.actions === "string") updateArgs.actions = body.actions;
   if (typeof body.context === "string") updateArgs.context = body.context;

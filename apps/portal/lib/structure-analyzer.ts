@@ -1,41 +1,27 @@
 /**
- * 项目结构分析器 — prompt 构建 + 结果解析
+ * 项目结构分析器 — 确定性提取标准 Java DDD 项目的「场景 × 功能点」矩阵。
  *
- * 两阶段 Agent 流程：
- * Phase 1 (runNode):  扫描 src/main/java，收集 Handler/Action 清单及分支条件
- * Phase 2 (runClassify): 基于清单推断域 / 功能点 / 场景
+ * 标准项目(由 ArchUnit 架构测试约束、各 BC 同构)的业务结构有确定性权威来源：
+ *   - 场景(X 轴) = BizScene enum                (shared/scene/BizScene.java)
+ *   - 功能点(Y 轴) = 各域 XxxFeature enum       ({domain}/decider/XxxFeature.java)
+ *   - 单元格(场景,功能点) → Handler = DefaultXxxDecider 的 switch(scene){switch(feature)} 网格
+ *
+ * 因此不再用 LLM 猜 businessDimensions —— 直接解析 Java 源码,与代码 1:1。
  */
 
-// ---------------------------------------------------------------------------
-// 类型
-// ---------------------------------------------------------------------------
+import type { Dirent } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 
-export interface ScannedHandler {
-  className: string;
-  qualifiedName: string;
-  packageName: string;
-  methods: string[];
-  businessDimensions: string[]; // 仅业务级分支维度（如 contractType: FORMAL | TEST）
-  calledActions: string[];
-  linesOfCode: number;
-  hasRealLogic: boolean; // false = 骨架 / TODO
-}
-
-export interface ScannedClass {
-  className: string;
-  qualifiedName: string;
-  type: "handler" | "action" | "domain-service" | "model" | "repository" | "other";
-  methods: number;
-  todos: number;
-  lines: number;
-  skeleton: boolean;
-}
+// ---------------------------------------------------------------------------
+// 类型(结构保持不变,下游 dialog / apply-structure / storage 均兼容)
+// ---------------------------------------------------------------------------
 
 export interface InferredScenario {
   name: string;
   status: string;
   confidence: "high" | "low";
-  branchHint?: string; // 推断依据
+  branchHint?: string;
 }
 
 export interface InferredFeature {
@@ -57,326 +43,301 @@ export interface StructureAnalysisResult {
     features: InferredFeature[];
   }>;
   scanSummary: {
-    totalHandlers: number;
-    totalActions: number;
     totalDomains: number;
+    totalFeatures: number;
+    totalScenes: number;
+    durationMs: number;
+    /** @deprecated 旧 UI 过渡期兼容(= totalFeatures) */
+    totalHandlers: number;
+    /** @deprecated 旧 UI 过渡期兼容(=0,确定性解析不再采集 Action 清单) */
+    totalActions: number;
+    /** @deprecated 旧 UI 过渡期兼容(= durationMs) */
     scanDurationMs: number;
+    /** @deprecated 旧 UI 过渡期兼容(=0,已无独立 infer 阶段) */
     classifyDurationMs: number;
   };
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 Prompt: 扫描代码库
+// 域名映射(与 lib/matrix.ts 的 DOMAIN_NAMES 保持一致 + product)
 // ---------------------------------------------------------------------------
 
-export function buildScanPrompt(): string {
-  return `## 任务
+// 与 lib/matrix.ts 的 DOMAIN_NAMES 保持一致(+ product)
+const DOMAIN_LABELS: Record<string, string> = {
+  deliver: "交付管理",
+  mapping: "产品映射",
+  pricing: "价格配置",
+  signing: "签约",
+  product: "产品映射管理",
+  ops: "运维",
+  shared: "共享",
+};
 
-扫描项目中的所有 Java 源文件，生成两份结构化清单。
-
-### 扫描策略
-- **单模块项目**：直接扫描 src/main/java
-- **多模块项目**：扫描所有子模块下的 src/main/java（如 app/*/src/main/java, */src/main/java 等）
-- 先用 Glob 查找所有 .java 文件：**/*.java 或 **/src/main/java/**/*.java
-- 不要遗漏任何子目录中的 Java 文件
-
-### 清单 1: 类清单 (Inventory)
-
-对每个 Java 类记录：
-- className: 简单类名
-- qualifiedName: 完整包名.类名
-- type: 按 DDD 分层判断类型
-  - 文件路径含 handler → "handler"
-  - 文件路径含 action → "action"
-  - 文件路径含 domain/service → "domain-service"
-  - 文件路径含 model/entity/vo/dto → "model"
-  - 文件路径含 repository/dao/mapper → "repository"
-  - 其他 → "other"
-- methods: 公共方法数量
-- todos: TODO/FIXME 注释数量
-- lines: 有效代码行数（去掉空行和注释）
-- skeleton: 是否骨架代码（方法体只有 return null/0/""/throw UnsupportedOperationException/空块/仅调 super）
-
-### 清单 2: Handler 分析
-
-对每个 Handler 类（文件路径含 handler）：
-- className: 类名
-- qualifiedName: 完整包名
-- packageName: 包名（取 handler 之前的路径段作为域标识，如 com.example.deliver.handler → "deliver"）
-- methods: 所有 public 方法名列表
-- businessDimensions: **仅采集业务级分支维度**
-  ⚠️ 这是最关键的字段，请务必严格区分"业务维度"和"实现分支"：
-
-  **属于业务维度 → 应采集**：
-  - 决定走哪条业务流程的枚举：如 contractType(FORMAL/TEST)、signingMode(ONLINE/OFFLINE)、orderSource(MANUAL/IMPORT)
-  - 决定功能是否有本质不同的业务条件：如 是否组合签约、是否单品定价
-  - 通俗讲：如果改了这个值，Handler 会走**完全不同的业务流程**，则属于业务维度
-
-  **不属于业务维度 → 不要采集**：
-  - 状态流转：审批通过/驳回/撤消、节点通过/驳回 —— 这些是同一流程内的状态变化，不是独立场景
-  - 校验结果：校验通过/失败、逆向检查通过/失败 —— 这是流程中的条件判断，不是独立场景
-  - 异常处理：try/catch、业务异常/系统异常 —— 所有场景都有异常处理，不是独立场景
-  - 回调类型：协议状态回调/签约回调/价格回调 —— 回调是触发方式，不是场景维度
-  - 数据校验：记录号为空跳过、状态码为空 —— 这是防御性编码，不是场景
-  - 执行结果：正常/异常、解析为通过/驳回 —— 这是执行结果，不是场景
-
-  采集格式：列出变量名和所有业务枚举值，如：
-  - "contractType: FORMAL | TEST"
-  - "signingMode: COMBO | SINGLE"
-  - 无业务维度时输出空数组 []
-- calledActions: 该 Handler 调用的 Action 类名列表
-- linesOfCode: 有效代码行数
-- hasRealLogic: 是否有真正的业务逻辑（非骨架）
-
-### 判断骨架代码的规则
-方法体仅有以下内容视为骨架：
-- return null; return 0; return ""; return false;
-- throw new UnsupportedOperationException
-- 空方法体
-- 仅调用 super.xxx()
-
-## 输出格式
-
-用 XML 标签分别包裹两份 JSON 数组：
-
-\`\`\`
-<INVENTORY>
-[
-  {"className":"SaveDeliverRecordHandler","qualifiedName":"com.example.deliver.handler.SaveDeliverRecordHandler","type":"handler","methods":5,"todos":0,"lines":120,"skeleton":false},
-  ...（所有类）
-]
-</INVENTORY>
-
-<HANDLER_ANALYSIS>
-[
-  {"className":"SaveDeliverRecordHandler","qualifiedName":"com.example.deliver.handler.SaveDeliverRecordHandler","packageName":"com.example.deliver","methods":["handle","validate","save"],"businessDimensions":["contractType: FORMAL | TEST"],"calledActions":["SaveDeliverRecordAction"],"linesOfCode":120,"hasRealLogic":true},
-  ...（所有 Handler）
-]
-</HANDLER_ANALYSIS>
-\`\`\`
-
-只输出 JSON（带标签），不要其他内容。务必扫描所有子目录，不要遗漏。`;
-}
+// feature.id 前缀(域 → 编号前缀)
+const DOMAIN_PREFIX: Record<string, string> = {
+  deliver: "D",
+  signing: "S",
+  product: "PD",
+  pricing: "PR",
+  ops: "O",
+  shared: "SH",
+  mapping: "P",
+};
 
 // ---------------------------------------------------------------------------
-// Phase 2 Prompt: 推断域 / 功能点 / 场景
+// 文件查找(原生 fs 递归,不引入 glob 依赖)
 // ---------------------------------------------------------------------------
 
-export function buildInferPrompt(inventory: ScannedClass[], handlers: ScannedHandler[]): string {
-  const inventoryJson = JSON.stringify(inventory, null, 2);
-  const handlersJson = JSON.stringify(handlers, null, 2);
+const SKIP_DIRS = new Set(["node_modules", ".git", "target", "build", ".idea", "out", "dist"]);
 
-  return `## 任务
+async function findJavaFiles(
+  root: string,
+  predicate: (name: string) => boolean,
+): Promise<string[]> {
+  const out: string[] = [];
 
-基于代码扫描结果，推断项目的域(Domain)划分、功能点(Feature)和**业务场景**(Scenario)。
-
-⚠️ 场景(Scenario)的定义是核心难点，请务必仔细阅读下方规则。
-
-## 输入数据
-
-### 类清单
-\`\`\`json
-${inventoryJson}
-\`\`\`
-
-### Handler 分析
-\`\`\`json
-${handlersJson}
-\`\`\`
-
-## 推断规则
-
-### 1. 域(Domain)推断
-- 以 Handler 的 packageName 中 handler 之前的路径段作为域 ID
-- 例: com.example.deliver.handler → domain.id="deliver", domain.name="交付管理"
-- 如果有中文注释或类名暗示的领域，使用更友好的中文名称
-- 对于没有 handler 的域（如基础设施），归入 "shared" 域
-
-### 2. 功能点(Feature)推断
-- 每个 Handler 类 → 一个功能点
-- feature.id: 按 "D-01", "D-02"... 顺序编号（D=域首字母大写）
-  - 如果有多个域，用不同前缀：deliver → D-01, mapping → M-01, pricing → P-01
-- feature.name: 从 Handler 类名推断中文名称
-  - SaveDeliverRecordHandler → "保存交付记录"
-  - CreateOrderHandler → "创建订单"
-  - 去掉 Handler 后缀，将驼峰转为中文功能描述
-- feature.handler: Handler 类名
-- feature.actions: 该 Handler 调用的 Action 类名列表
-- feature.context: 域 ID
-- feature.priority: 默认 "P1"
-
-### 3. 场景(Scenario)推断 — ⚠️ 核心规则，请严格遵守
-
-**场景 = 业务维度**，即决定该功能走哪条**根本不同的业务流程**的分支条件。
-场景 ≠ 实现细节、状态流转、校验结果、异常分支。
-
-#### 什么是场景（✅ 应创建）
-
-场景代表**同一功能在不同业务条件下的流程差异**。典型模式：
-
-1. **签约类型**：正式签约
-2. **业务模式**：组合签约 / 单品签约 / 历史组合复用
-3. **业务来源**：手动创建 / 批量导入 / API 触发
-4. **签约渠道**：线上签约 / 线下签约
-
-判断标准：**如果切换这个条件，Handler 会走完全不同的 Action 组合或业务流**，则属于业务场景。
-
-#### 什么不是场景（❌ 禁止创建）
-
-以下代码模式**绝对不能**作为独立场景，它们是同一业务流程内的实现分支：
-
-- ❌ **审批/审核结果**：审批通过、审批驳回、审批撤消 → 这是同一个场景内的状态流转，不是不同的业务场景
-- ❌ **校验结果**：校验通过、校验失败、逆向校验通过、逆向校验失败 → 这是流程中的条件判断
-- ❌ **异常路径**：正常执行、异常处理、业务异常重抛、系统异常重抛 → 所有场景都有异常处理
-- ❌ **节点状态**：节点通过、节点驳回、节点撤消 → 这是流程节点的状态变化
-- ❌ **回调类型**：协议状态回调、签约操作回调、价格方案回调 → 回调是触发机制，不是业务维度
-- ❌ **解析结果**：解析为通过、解析为驳回、解析为撤消 → 这是回调处理的结果
-- ❌ **数据校验**：状态码为空、记录号为空-跳过 → 防御性编程
-- ❌ **推进方式**：审批通过-推进并构建签约树 → 这是审批通过后的后续动作，不是独立场景
-- ❌ **退回/删除细分**：逆向校验通过-退回、逆向校验通过-删除 → 退回和删除本身就是独立功能点，不是同一功能点的场景
-
-#### 场景推断策略
-
-**策略 A — 有 businessDimensions 时的精确推断（置信度 high）**:
-- 直接从 Handler 的 businessDimensions 提取业务维度
-- 例: businessDimensions=["contractType: FORMAL"] → 场景: "正式签约"
-- 例: businessDimensions=["signingMode: COMBO | SINGLE"] → 场景: "组合签约" / "单品签约"
-- 例: businessDimensions=["source: MANUAL | IMPORT"] → 场景: "手动创建" / "批量导入"
-
-**策略 B — 无 businessDimensions 但类名暗示业务维度（置信度 medium）**:
-- Handler 名含 Submit/Approve → 可能只是"提交"动作，默认场景即可
-- Handler 名含 Query/List → 查询类功能，默认场景即可
-- Handler 名含 Check/Validate → 校验类功能，默认场景即可
-
-**策略 C — 无法推断时（置信度 low，默认降级）**:
-- 使用单一默认场景: [{"name":"默认场景","status":"待实现","confidence":"low"}]
-
-#### ⚠️ 硬性约束
-
-1. **每个功能点的场景数 ≤ 3**（极少数情况可到 5，但必须每个都是真正的业务维度）
-2. **绝对禁止**把以下内容作为场景：审批结果、校验结果、异常路径、回调类型、状态流转、数据校验
-3. **场景名应是业务术语**（如"正式签约"），而非技术术语（如"构建签约树"）
-4. 如果一个 Handler 只做一件事（如查询、校验），只给"默认场景"
-
-### 4. 场景状态
-- 所有场景默认 status: "待实现"
-- 如果 Handler 的 hasRealLogic=true 且无 TODO → 置信度 high，但仍标记为"待实现"（后续由 analyze-status 判断真实状态）
-
-## 输出格式
-
-输出 JSON 数组，用 \`<STRUCTURE_RESULT>\` 和 \`</STRUCTURE_RESULT>\` 标签包裹：
-
-\`\`\`
-<STRUCTURE_RESULT>
-{
-  "domains": [
-    {
-      "id": "deliver",
-      "name": "交付管理",
-      "features": [
-        {
-          "id": "D-01",
-          "name": "保存交付记录",
-          "domain": "deliver",
-          "domainName": "交付管理",
-          "handler": "SaveDeliverRecordHandler",
-          "actions": ["SaveDeliverRecordAction"],
-          "context": "deliver",
-          "priority": "P1",
-          "scenarios": [
-            {"name": "正式签约", "status": "待实现", "confidence": "high", "branchHint": "contractType: FORMAL"}
-          ]
-        },
-        {
-          "id": "D-02",
-          "name": "查询交付记录",
-          "domain": "deliver",
-          "domainName": "交付管理",
-          "handler": "QueryDeliverRecordHandler",
-          "actions": ["QueryAction"],
-          "context": "deliver",
-          "priority": "P1",
-          "scenarios": [
-            {"name": "默认场景", "status": "待实现", "confidence": "low", "branchHint": ""}
-          ]
-        }
-      ]
+  async function walk(dir: string): Promise<void> {
+    let ents: Dirent[];
+    try {
+      ents = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
     }
-  ]
-}
-</STRUCTURE_RESULT>
-\`\`\`
-
-只输出 JSON（带标签），不要其他内容。每个 Handler 必须对应一个功能点。场景数量严格 ≤ 3。`;
-}
-
-// ---------------------------------------------------------------------------
-// 输出解析
-// ---------------------------------------------------------------------------
-
-export function parseInventoryOutput(text: string): ScannedClass[] {
-  const match = text.match(/<INVENTORY>([\s\S]*?)<\/INVENTORY>/);
-  if (!match?.[1]) return [];
-  try {
-    let raw = match[1].trim();
-    const fence = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (fence?.[1]) raw = fence[1].trim();
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item: unknown): item is ScannedClass =>
-        typeof item === "object" && item !== null && "className" in item,
-    );
-  } catch {
-    return [];
+    for (const e of ents) {
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) await walk(join(dir, e.name));
+      } else if (e.isFile() && e.name.endsWith(".java") && predicate(e.name)) {
+        out.push(join(dir, e.name));
+      }
+    }
   }
+
+  await walk(root);
+  return out;
 }
 
-export function parseHandlerOutput(text: string): ScannedHandler[] {
-  const match = text.match(/<HANDLER_ANALYSIS>([\s\S]*?)<\/HANDLER_ANALYSIS>/);
-  if (!match?.[1]) return [];
-  try {
-    let raw = match[1].trim();
-    const fence = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (fence?.[1]) raw = fence[1].trim();
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item: unknown): item is Record<string, unknown> =>
-          typeof item === "object" && item !== null && "className" in item,
-      )
-      .map((item) => ({
-        className: String(item.className ?? ""),
-        qualifiedName: String(item.qualifiedName ?? ""),
-        packageName: String(item.packageName ?? ""),
-        methods: Array.isArray(item.methods) ? (item.methods as string[]) : [],
-        // 兼容旧字段 branchConditions 和新字段 businessDimensions
-        businessDimensions: Array.isArray(item.businessDimensions)
-          ? (item.businessDimensions as string[])
-          : Array.isArray(item.branchConditions)
-            ? (item.branchConditions as string[])
-            : [],
-        calledActions: Array.isArray(item.calledActions) ? (item.calledActions as string[]) : [],
-        linesOfCode: typeof item.linesOfCode === "number" ? item.linesOfCode : 0,
-        hasRealLogic: typeof item.hasRealLogic === "boolean" ? item.hasRealLogic : true,
+async function readUtf8(path: string): Promise<string> {
+  return readFile(path, "utf8");
+}
+
+/** 从路径 .../application/{domain}/decider/Xxx.java 提取 domain */
+function extractDomainFromPath(p: string): string | null {
+  const segs = p.split("/");
+  const i = segs.lastIndexOf("decider");
+  return i > 0 ? segs[i - 1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// 纯解析函数
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析 BizScene.java,提取全部业务场景。
+ * 形如: FORMAL_SIGN("FORMAL_SIGN", "正式签约")
+ */
+export function extractBizScenes(src: string): Array<{ code: string; name: string }> {
+  const block = src.match(/enum\s+BizScene\s*\{([\s\S]*?)\n\}/)?.[1];
+  if (!block) return [];
+  const re = /(\w+)\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
+  const out: Array<{ code: string; name: string }> = [];
+  for (const m of block.matchAll(re)) {
+    out.push({ code: m[2], name: m[3] });
+  }
+  return out;
+}
+
+/**
+ * 解析 XxxFeature.java,提取全部功能点及其 javadoc 中文名。
+ * 形如:
+ *   /** 创建交付需求 *\/
+ *   CREATE,
+ */
+export function extractFeatureEnum(src: string): Array<{ name: string; label: string }> {
+  const block = src.match(/enum\s+\w*Feature\s*\{([\s\S]*?)\n\}/)?.[1];
+  if (!block) return [];
+  const out: Array<{ name: string; label: string }> = [];
+  const seen = new Set<string>();
+
+  // 主: 单行 javadoc + 大写枚举名 (方法的 javadoc 后跟 public/private 等小写关键字,不会误匹配)
+  const reDoc = /\/\*\*\s*([^*]+?)\s*\*\/\s*([A-Z][A-Z0-9_]*)\b/g;
+  for (const m of block.matchAll(reDoc)) {
+    const name = m[2];
+    if (!seen.has(name)) {
+      seen.add(name);
+      out.push({ name, label: m[1].trim() });
+    }
+  }
+
+  // 兜底: 无 javadoc 的裸枚举值 (行级,排除方法体里的 return XXX;)
+  const reBare = /^\s*([A-Z][A-Z0-9_]*)\s*(?:\([^)]*\))?\s*[,;]?\s*$/gm;
+  for (const m of block.matchAll(reBare)) {
+    if (!seen.has(m[1])) {
+      seen.add(m[1]);
+      out.push({ name: m[1], label: m[1] });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 解析 DefaultXxxDecider.java 的 switch(feature) 网格,得 feature → {handler, active}。
+ * 当前单场景(BizScene 仅 FORMAL_SIGN),所有 feature case 都归属该场景;
+ * 未来多场景时需按 chooseForXxx(feature) 方法分块关联。
+ *
+ * active=false 的判定由调用方完成:Feature enum 全集中不在 grid 里的 = 未接入(注释/缺 case)。
+ */
+export function extractDeciderGrid(src: string): Map<string, { handler: string; active: boolean }> {
+  const grid = new Map<string, { handler: string; active: boolean }>();
+
+  // 1. @Resource 注入: handlerVar → Handler 类名
+  const injects = new Map<string, string>();
+  const reInj = /@Resource\s+(?:private\s+)?(\w+)\s+(\w+)\s*;/g;
+  for (const m of src.matchAll(reInj)) {
+    injects.set(m[2], m[1]);
+  }
+
+  // 2. 在每个 switch(feature){...} 块内,行级扫活跃 case FEATURE: return handlerVar;
+  //    (整行 // 注释的 case —— 如被注释掉的 QT_FUSION_AUTO —— 自然跳过,故不会进 grid)
+  const reBlock = /switch\s*\(\s*feature\s*\)\s*\{([\s\S]*?)\n\s*\}/g;
+  for (const featureBlock of src.matchAll(reBlock)) {
+    const lines = featureBlock[1].split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+      const cased = trimmed.match(/^case\s+([A-Z][A-Z0-9_]*)\s*:/);
+      if (!cased) continue;
+      const feature = cased[1];
+
+      // return handlerVar; 可能在本行或随后几行
+      let handlerVar: string | null = null;
+      const sameLine = trimmed.match(/return\s+(\w+)\s*;/);
+      if (sameLine) {
+        handlerVar = sameLine[1];
+      } else {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const lt = lines[j].trim();
+          if (lt === "" || lt.startsWith("//") || lt.startsWith("*")) continue;
+          const r = lt.match(/^return\s+(\w+)\s*;/);
+          if (r) handlerVar = r[1];
+          break;
+        }
+      }
+      const className = handlerVar ? (injects.get(handlerVar) ?? handlerVar) : "";
+      // 仅当 return 的是注入字段(Handler)时算有效;方法调用(如 chooseForFormalSign)不会匹配 return \w+;
+      if (handlerVar) {
+        grid.set(feature, { handler: className, active: true });
+      }
+    }
+  }
+
+  return grid;
+}
+
+// ---------------------------------------------------------------------------
+// 顶层:分析整个项目
+// ---------------------------------------------------------------------------
+
+function makeFeatureId(domain: string, idx: number): string {
+  const prefix = DOMAIN_PREFIX[domain] ?? domain.toUpperCase().slice(0, 2);
+  return `${prefix}-${String(idx + 1).padStart(2, "0")}`;
+}
+
+/**
+ * 确定性分析标准项目结构,产出「场景 × 功能点」矩阵。
+ * @param sandboxPath 项目根(含 app/application/... 标准 DDD 结构)
+ */
+export async function analyzeProjectStructure(
+  sandboxPath: string,
+): Promise<StructureAnalysisResult> {
+  const startedAt = Date.now();
+
+  // 1. 定位标准文件
+  const [bizSceneFiles, featureFiles, deciderFiles] = await Promise.all([
+    findJavaFiles(sandboxPath, (n) => n === "BizScene.java"),
+    findJavaFiles(sandboxPath, (n) => /^\w+Feature\.java$/.test(n)),
+    findJavaFiles(sandboxPath, (n) => /^Default\w*Decider\.java$/.test(n)),
+  ]);
+
+  // 2. BizScene 场景全集
+  const bizScenes =
+    bizSceneFiles[0] !== undefined ? extractBizScenes(await readUtf8(bizSceneFiles[0])) : [];
+  if (bizScenes.length === 0) {
+    throw new Error("未找到 BizScene.java 或解析不到业务场景枚举(非标准 DDD 项目?)");
+  }
+
+  // 3. 按 domain 归并 feature enum 文件与 decider 文件
+  const domainFiles = new Map<string, { feature?: string; decider?: string }>();
+  for (const f of featureFiles) {
+    const dom = extractDomainFromPath(f);
+    if (!dom) continue;
+    domainFiles.set(dom, { ...domainFiles.get(dom), feature: f });
+  }
+  for (const f of deciderFiles) {
+    const dom = extractDomainFromPath(f);
+    if (!dom) continue;
+    domainFiles.set(dom, { ...domainFiles.get(dom), decider: f });
+  }
+
+  // 4. 组装每个域
+  const domains: StructureAnalysisResult["domains"] = [];
+  let totalFeatures = 0;
+
+  for (const [domain, files] of domainFiles) {
+    const featureEnum = files.feature ? extractFeatureEnum(await readUtf8(files.feature)) : [];
+    if (featureEnum.length === 0) continue;
+
+    const grid = files.decider
+      ? extractDeciderGrid(await readUtf8(files.decider))
+      : new Map<string, { handler: string; active: boolean }>();
+
+    const features: InferredFeature[] = featureEnum.map((fe, idx) => {
+      const cell = grid.get(fe.name);
+      const scenarios: InferredScenario[] = bizScenes.map((s) => ({
+        name: s.name,
+        status: "待实现",
+        confidence: cell?.active ? "high" : "low",
+        branchHint: cell?.active ? s.code : "Decider 网格未接入(TODO)",
       }));
-  } catch {
-    return [];
-  }
-}
+      return {
+        id: makeFeatureId(domain, idx),
+        name: fe.label,
+        domain,
+        domainName: DOMAIN_LABELS[domain] ?? domain,
+        handler: cell?.handler ?? "",
+        actions: [],
+        context: domain,
+        priority: "P1",
+        scenarios,
+      };
+    });
 
-export function parseStructureResult(text: string): StructureAnalysisResult | null {
-  const match = text.match(/<STRUCTURE_RESULT>([\s\S]*?)<\/STRUCTURE_RESULT>/);
-  if (!match?.[1]) return null;
-  try {
-    let raw = match[1].trim();
-    const fence = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-    if (fence?.[1]) raw = fence[1].trim();
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.domains)) return null;
-    return parsed as StructureAnalysisResult;
-  } catch {
-    return null;
+    domains.push({
+      id: domain,
+      name: DOMAIN_LABELS[domain] ?? domain,
+      features,
+    });
+    totalFeatures += features.length;
   }
+
+  if (domains.length === 0) {
+    throw new Error("未找到任何 *Feature.java 功能点枚举(非标准 DDD 项目?)");
+  }
+
+  const durationMs = Date.now() - startedAt;
+
+  return {
+    domains,
+    scanSummary: {
+      totalDomains: domains.length,
+      totalFeatures,
+      totalScenes: bizScenes.length,
+      durationMs,
+      // 旧 UI 过渡期兼容
+      totalHandlers: totalFeatures,
+      totalActions: 0,
+      scanDurationMs: durationMs,
+      classifyDurationMs: 0,
+    },
+  };
 }

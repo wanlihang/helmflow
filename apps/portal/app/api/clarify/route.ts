@@ -1,4 +1,4 @@
-// 需求节点 API — 加载 HelmCode core/clarify skill,产出行为契约。
+// clarify(需求澄清)节点 API — 加载 HelmCode core/clarify skill,产出行为契约。
 
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -6,19 +6,18 @@ import { dirname, join } from "node:path";
 import { getDb } from "@/lib/db";
 import { guardCellOperable } from "@/lib/guard";
 import { type Feature, getDomainOfFeature, getFeature, loadMatrix } from "@/lib/matrix";
-import {
-  createSseHeartbeat,
-  isString,
-  resolveHelmcodeRoot,
-  resolveSandboxPath,
-  sseEncode,
-  sseResponse,
-} from "@/lib/server-utils";
+import { isString, resolveHelmcodeRoot, resolveSandboxPath } from "@/lib/server-utils";
 import { scanJavaInventory } from "@helmflow/adapter-java-ddd";
 import { type Issue, runClarifierCritic } from "@helmflow/agent-core";
 import { type NodeRunEvent, runClassify, runNode } from "@helmflow/agent-runner";
 import { parseContract } from "@helmflow/contract-schema";
 import { HelmcodeManager } from "@helmflow/helmcode-manager";
+import {
+  type OrchestratorEvent,
+  createRunEmitter,
+  emitEvent,
+  scheduleEmitterCleanup,
+} from "@helmflow/orchestrator";
 import {
   createAttempt,
   createContract,
@@ -71,12 +70,18 @@ function buildUserPrompt(args: {
       ? `## 场景上下文\n本功能在「${args.scenarioName}」场景下已存在实现,但需按 HelmCode 规范治理对齐。\n实现定位: handler=${impl.handler || "(未指定)"}, actions=${impl.actions.join(", ") || "(无)"}。\n请基于现有实现行为,产出符合规范的行为契约。`
       : `## 场景上下文\n本功能在「${args.scenarioName}」场景下尚未落地,为待实现需求。`;
 
+  // 功能点的大致描述(用户填写) —— 作为需求澄清的高优先级上下文
+  const descBlock =
+    args.feature.description.trim().length > 0
+      ? `## 功能描述\n${args.feature.description.trim()}\n\n`
+      : "";
+
   const base = `以下是本次需求澄清的输入。
 
-${scenarioContext}
+${descBlock}${scenarioContext}
 
 ## userRequest
-${trimmed.length > 0 ? trimmed : "(用户未填写,请基于 feature 元数据合理推断)"}
+${trimmed.length > 0 ? trimmed : "(用户未填写,请基于功能描述与 feature 元数据合理推断)"}
 
 ## feature 元数据
 - id: ${args.feature.id}
@@ -101,7 +106,6 @@ function synthesizeContractHeader(args: {
   featureId: string;
   domain: string;
   matrixCellId: string;
-  priority: string;
 }): string {
   return [
     `# Feature: ${args.featureId}`,
@@ -111,7 +115,6 @@ function synthesizeContractHeader(args: {
     `> - 涉及领域: ${args.domain}`,
     "> - 状态: draft",
     `> - matrixCellId: ${args.matrixCellId}`,
-    `> - 优先级: ${args.priority || "P1"}`,
     "",
   ].join("\n");
 }
@@ -139,7 +142,7 @@ function hashMarkdown(markdown: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/require — 恢复最近一次 Clarifier 运行状态
+// GET /api/clarify — 恢复最近一次 Clarifier 运行状态
 // ---------------------------------------------------------------------------
 
 export async function GET(req: Request): Promise<Response> {
@@ -150,7 +153,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const db = getDb();
-  const runs = listRunsByKind(db, "require", 20);
+  const runs = listRunsByKind(db, "clarify", 20);
 
   let matchedRun: (typeof runs)[number] | undefined;
   let matchedEvents: Awaited<ReturnType<typeof listRunEvents>> = [];
@@ -287,7 +290,13 @@ export async function POST(req: Request): Promise<Response> {
       systemPrompt +=
         "\n\n---\n【HelmFlow 采集覆盖指令(优先级最高,覆盖上文任何「写文件/产出文件到 .claude/contracts/」要求)】\n" +
         "禁止使用任何工具(Bash/Write/Edit 等)创建或写入文件。将完整的行为契约 markdown 直接作为你的回复正文(assistant text)输出,须依次包含:\n" +
-        "# Feature 标题;引用块业务元(> - Feature ID / > - 涉及领域 / > - 状态);## 问题定义;## 状态机;## 业务规则(BR-xxx,每条可验证);## 验收条件(AC-xxx);## API 契约;## 领域模型。\n" +
+        "# Feature 标题;引用块业务元(> - Feature ID / > - 涉及领域 / > - 状态);## 问题定义;## 状态机;## 业务规则;## 验收条件;## API 契约;## 领域模型。\n" +
+        "【ID 格式强约束(违反会被解析器直接拒绝,本轮判失败)】业务规则与验收条件用 markdown 无序列表,每条 id 必须严格如下,不得有任何变体:\n" +
+        "  - BR-001: 规则描述(BR- + 三位数字,至少 1 条)\n" +
+        "  - BR-002: ...\n" +
+        "  - AC-001: 可验证的验收条件描述(AC- + 三位数字,至少 1 条)\n" +
+        "  - AC-002: ...\n" +
+        "严禁 AC-1/AC01/AC-A/验收条件1/BR1 等其他写法;businessRules 数组至少 1 条、acceptanceCriteria 至少 1 条。\n" +
         "你的回复正文会被原样采集为契约内容——不要输出思考过程、寒暄或解释,不要调用写文件工具,一次性输出完整契约 markdown。";
     }
   } catch (err) {
@@ -308,7 +317,7 @@ export async function POST(req: Request): Promise<Response> {
       standardsChecksum: versionInfo.checksum,
     });
   }
-  const run = createRun(db, cellId, "require");
+  const run = createRun(db, cellId, "clarify");
 
   createRunEvent(db, run.id, "require-input", {
     type: "require-input",
@@ -317,255 +326,245 @@ export async function POST(req: Request): Promise<Response> {
     userRequest,
   });
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const { start: startHb, stop: stopHb } = createSseHeartbeat(encoder, controller);
-      startHb();
-      try {
-        const sse = (payload: unknown) => {
-          try {
-            createRunEvent(db, run.id, (payload as { type: string }).type, payload);
-          } catch {
-            // DB 写入失败不应阻塞流
-          }
-          try {
-            controller.enqueue(sseEncode(encoder, payload));
-          } catch {
-            // controller 已关闭,事件已落库不丢
-          }
-        };
+  createRunEmitter(run.id);
+  // 事件双写:落库(run_events,前端 /runs/[id] 回放) + 内存广播(run emitters,run 页 SSE 实时)。
+  const emit = (payload: unknown): void => {
+    try {
+      createRunEvent(db, run.id, (payload as { type: string }).type, payload);
+    } catch {
+      // DB 写入失败不应阻塞后台任务
+    }
+    try {
+      emitEvent(run.id, payload as unknown as OrchestratorEvent);
+    } catch {
+      // emitter 不存在/已清理,事件已落库不丢
+    }
+  };
 
-        sse({ type: "require-start", cellId, featureId, scenarioName });
+  // 后台异步执行 Clarifier,立即返回 runId 让前端跳 run 页实时观看。
+  void (async () => {
+    try {
+      emit({ type: "require-start", cellId, featureId, scenarioName });
 
-        const runOneAttempt = async (
-          iteration: number,
-          reflection: string | null,
-        ): Promise<{ ok: boolean; markdown: string; issues: Issue[] }> => {
-          const attempt = createAttempt(
-            db,
-            run.id,
-            "require",
-            iteration,
-            "running",
-            versionInfo
-              ? { version: versionInfo.helmcode, checksum: versionInfo.checksum }
-              : undefined,
-          );
-          const userPrompt = buildUserPrompt({
-            feature,
-            scenarioName,
-            scenarioStatus: guard.cell.scenarioStatus,
-            userRequest,
-            reflection,
-          });
-          const collected: string[] = [];
+      const runOneAttempt = async (
+        iteration: number,
+        reflection: string | null,
+      ): Promise<{ ok: boolean; markdown: string; issues: Issue[] }> => {
+        const attempt = createAttempt(
+          db,
+          run.id,
+          "clarify",
+          iteration,
+          "running",
+          versionInfo
+            ? { version: versionInfo.helmcode, checksum: versionInfo.checksum }
+            : undefined,
+        );
+        const userPrompt = buildUserPrompt({
+          feature,
+          scenarioName,
+          scenarioStatus: guard.cell.scenarioStatus,
+          userRequest,
+          reflection,
+        });
+        const collected: string[] = [];
 
-          let nodeResult;
-          try {
-            nodeResult = await runNode({
-              cwd: process.cwd(),
-              systemPrompt,
-              userPrompt,
-              allowedTools: ["Read", "Bash", "Glob", "Grep"],
-              maxTurns: MAX_TURNS_PER_ROUND,
-              additionalDirectories: additionalDirs.length > 0 ? additionalDirs : undefined,
-              onEvent: (event: NodeRunEvent) => {
-                if (event.type === "assistant.text") {
-                  collected.push(event.text);
-                  sse({ type: "token", text: event.text });
-                } else if (event.type === "tool_use") {
-                  sse({
-                    type: "tool_use",
-                    toolUseId: event.toolUseId,
-                    name: event.name,
-                    input: event.input,
-                  });
-                } else if (event.type === "tool_result") {
-                  sse({
-                    type: "tool_result",
-                    toolUseId: event.toolUseId,
-                    isError: event.isError,
-                    preview: event.preview,
-                  });
-                } else if (event.type === "system.init") {
-                  sse({
-                    type: "system-init",
-                    sessionId: event.sessionId,
-                    cwd: event.cwd,
-                    model: event.model,
-                  });
-                } else if (event.type === "result") {
-                  sse({
-                    type: "result-cost",
-                    success: event.success,
-                    turns: event.turns,
-                    durationMs: event.durationMs,
-                    costUsd: event.costUsd ?? null,
-                  });
-                }
-              },
-            });
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            updateAttempt(db, attempt.id, { status: "failed" });
-            return {
-              ok: false,
-              markdown: collected.join(""),
-              issues: [{ check: "agent-runner-exception", detail: message }],
-            };
-          }
-
-          if (!nodeResult.success) {
-            updateAttempt(db, attempt.id, { status: "failed" });
-            return {
-              ok: false,
-              markdown: collected.join(""),
-              issues: [
-                { check: "agent-runner-failed", detail: nodeResult.error ?? "agent run failed" },
-              ],
-            };
-          }
-
-          const modelMarkdown = collected.join("");
-          const header = synthesizeContractHeader({
-            featureId,
-            domain: domain?.id ?? feature.implementation.context,
-            matrixCellId: cellId,
-            priority: feature.priority,
-          });
-          const markdown = `${header}${modelMarkdown}`;
-
-          const parsed = parseContract(markdown);
-          if (!parsed.ok) {
-            updateAttempt(db, attempt.id, { status: "failed" });
-            return {
-              ok: false,
-              markdown,
-              issues: parsed.errors.map((e) => ({ check: "contract-parse", detail: e })),
-            };
-          }
-          const critic = runClarifierCritic(parsed.data);
-          if (!critic.pass) {
-            updateAttempt(db, attempt.id, { status: "failed" });
-            return { ok: false, markdown, issues: critic.issues };
-          }
-
-          const written = writeContractFile({ sandboxPath, cellId, markdown });
-          const contract = createContract(db, {
-            cellId,
-            status: "draft",
-            markdownPath: written.absPath,
-            contentHash: hashMarkdown(markdown),
-            source: "clarifier",
-            projectId,
-            originPath: written.absPath,
-          });
-          updateAttempt(db, attempt.id, { status: "passed", outputPath: written.absPath });
-          sse({ type: "contract-draft", contractId: contract.id, markdownPath: written.absPath });
-          return { ok: true, markdown, issues: [] };
-        };
-
+        let nodeResult: Awaited<ReturnType<typeof runNode>>;
         try {
-          let lastIssues: Issue[] = [];
-          let lastMarkdown = "";
-          let success = false;
-          for (let round = 1; round <= MAX_ROUNDS; round++) {
-            if (round > 1) {
-              sse({ type: "retry-start", round, reflection: buildReflection(lastIssues) });
-            }
-            const reflection = round === 1 ? null : buildReflection(lastIssues);
-            const outcome = await runOneAttempt(round, reflection);
-            lastMarkdown = outcome.markdown;
-            if (outcome.ok) {
-              success = true;
-              break;
-            }
-            lastIssues = outcome.issues;
-            sse({ type: "critic-fail", round, issues: outcome.issues });
-          }
-
-          if (success) {
-            // 契约产出成功后,分层分析:推断该需求在 DDD 四层(Decider/Acceptor/Handler/Action)的归属
-            try {
-              sse({ type: "layer-analysis-start", featureId });
-              const inventory = scanJavaInventory(sandboxPath);
-              const layerResult = await runClassify({
-                cwd: sandboxPath,
-                systemPrompt:
-                  "你是 DDD 分层架构分析师。基于需求契约和项目代码结构,推断该功能应该落在哪个 Decider/Acceptor/Handler/Action。输出 JSON。",
-                userPrompt: buildLayerAnalysisPrompt(feature, inventory),
-              });
-              const layerImpl = parseLayerAnalysisResult(layerResult.text);
-              if (layerImpl) {
-                updateFeatureImplementation(db, featureId, {
-                  decider: layerImpl.decider ?? "",
-                  acceptor: layerImpl.acceptor ?? "",
-                  handler: layerImpl.handler ?? "",
-                  actions: layerImpl.actions ? JSON.stringify(layerImpl.actions) : "",
+          nodeResult = await runNode({
+            cwd: sandboxPath,
+            systemPrompt,
+            userPrompt,
+            allowedTools: ["Read", "Bash", "Glob", "Grep"],
+            maxTurns: MAX_TURNS_PER_ROUND,
+            additionalDirectories: additionalDirs.length > 0 ? additionalDirs : undefined,
+            onEvent: (event: NodeRunEvent) => {
+              if (event.type === "assistant.text") {
+                collected.push(event.text);
+                emit({ type: "token", text: event.text });
+              } else if (event.type === "tool_use") {
+                emit({
+                  type: "tool_use",
+                  toolUseId: event.toolUseId,
+                  name: event.name,
+                  input: event.input,
                 });
-                sse({ type: "layer-analysis-done", featureId, implementation: layerImpl });
-              }
-            } catch (layerErr) {
-              // 分层分析失败不阻塞契约产出
-              sse({
-                type: "layer-analysis-skipped",
-                reason: layerErr instanceof Error ? layerErr.message : "unknown",
-              });
-            }
-
-            updateRun(db, run.id, "done");
-            updateCellAgentStatus(db, cellId, "clarifying");
-            sse({ type: "done", runId: run.id, status: "passed" });
-          } else {
-            updateRun(db, run.id, "failed");
-            // 失败兜底:仅在最后一次产物仍能解析为合法契约时才落库。否则 lastMarkdown 是
-            // 对话日志/思考过程(clarify agent 把契约写文件、assistant.text 只剩思考时),
-            // 落库会污染 contracts 表 —— 历史 source=clarifier/blocked 的空壳即来源于此。
-            if (lastMarkdown.length > 0 && parseContract(lastMarkdown).ok) {
-              try {
-                const written = writeContractFile({ sandboxPath, cellId, markdown: lastMarkdown });
-                createContract(db, {
-                  cellId,
-                  status: "blocked",
-                  markdownPath: written.absPath,
-                  contentHash: hashMarkdown(lastMarkdown),
-                  source: "clarifier",
-                  projectId,
-                  originPath: written.absPath,
+              } else if (event.type === "tool_result") {
+                emit({
+                  type: "tool_result",
+                  toolUseId: event.toolUseId,
+                  isError: event.isError,
+                  preview: event.preview,
                 });
-              } catch {
-                /* ignore */
+              } else if (event.type === "system.init") {
+                emit({
+                  type: "system-init",
+                  sessionId: event.sessionId,
+                  cwd: event.cwd,
+                  model: event.model,
+                });
+              } else if (event.type === "result") {
+                emit({
+                  type: "result-cost",
+                  success: event.success,
+                  turns: event.turns,
+                  durationMs: event.durationMs,
+                  costUsd: event.costUsd ?? null,
+                });
               }
-            }
-            updateCellAgentStatus(db, cellId, "blocked");
-            sse({ type: "done", runId: run.id, status: "blocked", issues: lastIssues });
-          }
+            },
+          });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          try {
-            updateRun(db, run.id, "failed");
-            updateCellAgentStatus(db, cellId, "blocked");
-          } catch {
-            /* ignore */
-          }
-          sse({ type: "error", message });
+          updateAttempt(db, attempt.id, { status: "failed" });
+          return {
+            ok: false,
+            markdown: collected.join(""),
+            issues: [{ check: "agent-runner-exception", detail: message }],
+          };
         }
-      } finally {
-        stopHb();
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      }
-    },
-    cancel() {
-      // heartbeat timer cleaned up by stopHb or GC
-    },
-  });
 
-  return sseResponse(stream);
+        if (!nodeResult.success) {
+          updateAttempt(db, attempt.id, { status: "failed" });
+          return {
+            ok: false,
+            markdown: collected.join(""),
+            issues: [
+              { check: "agent-runner-failed", detail: nodeResult.error ?? "agent run failed" },
+            ],
+          };
+        }
+
+        const modelMarkdown = collected.join("");
+        const header = synthesizeContractHeader({
+          featureId,
+          domain: domain?.id ?? feature.implementation.context,
+          matrixCellId: cellId,
+        });
+        const markdown = `${header}${modelMarkdown}`;
+
+        const parsed = parseContract(markdown);
+        if (!parsed.ok) {
+          updateAttempt(db, attempt.id, { status: "failed" });
+          return {
+            ok: false,
+            markdown,
+            issues: parsed.errors.map((e) => ({ check: "contract-parse", detail: e })),
+          };
+        }
+        const critic = runClarifierCritic(parsed.data);
+        if (!critic.pass) {
+          updateAttempt(db, attempt.id, { status: "failed" });
+          return { ok: false, markdown, issues: critic.issues };
+        }
+
+        const written = writeContractFile({ sandboxPath, cellId, markdown });
+        const contract = createContract(db, {
+          cellId,
+          status: "draft",
+          markdownPath: written.absPath,
+          contentHash: hashMarkdown(markdown),
+          source: "clarifier",
+          projectId,
+          originPath: written.absPath,
+        });
+        updateAttempt(db, attempt.id, { status: "passed", outputPath: written.absPath });
+        emit({ type: "contract-draft", contractId: contract.id, markdownPath: written.absPath });
+        return { ok: true, markdown, issues: [] };
+      };
+
+      try {
+        let lastIssues: Issue[] = [];
+        let lastMarkdown = "";
+        let success = false;
+        for (let round = 1; round <= MAX_ROUNDS; round++) {
+          if (round > 1) {
+            emit({ type: "retry-start", round, reflection: buildReflection(lastIssues) });
+          }
+          const reflection = round === 1 ? null : buildReflection(lastIssues);
+          const outcome = await runOneAttempt(round, reflection);
+          lastMarkdown = outcome.markdown;
+          if (outcome.ok) {
+            success = true;
+            break;
+          }
+          lastIssues = outcome.issues;
+          emit({ type: "critic-fail", round, issues: outcome.issues });
+        }
+
+        if (success) {
+          // 契约产出成功后,分层分析:推断该需求在 DDD 四层(Decider/Acceptor/Handler/Action)的归属
+          try {
+            emit({ type: "layer-analysis-start", featureId });
+            const inventory = scanJavaInventory(sandboxPath);
+            const layerResult = await runClassify({
+              cwd: sandboxPath,
+              systemPrompt:
+                "你是 DDD 分层架构分析师。基于需求契约和项目代码结构,推断该功能应该落在哪个 Decider/Acceptor/Handler/Action。输出 JSON。",
+              userPrompt: buildLayerAnalysisPrompt(feature, inventory),
+            });
+            const layerImpl = parseLayerAnalysisResult(layerResult.text);
+            if (layerImpl) {
+              updateFeatureImplementation(db, featureId, {
+                decider: layerImpl.decider ?? "",
+                acceptor: layerImpl.acceptor ?? "",
+                handler: layerImpl.handler ?? "",
+                actions: layerImpl.actions ? JSON.stringify(layerImpl.actions) : "",
+              });
+              emit({ type: "layer-analysis-done", featureId, implementation: layerImpl });
+            }
+          } catch (layerErr) {
+            // 分层分析失败不阻塞契约产出
+            emit({
+              type: "layer-analysis-skipped",
+              reason: layerErr instanceof Error ? layerErr.message : "unknown",
+            });
+          }
+
+          updateRun(db, run.id, "done");
+          updateCellAgentStatus(db, cellId, "clarifying");
+          emit({ type: "done", runId: run.id, status: "passed" });
+        } else {
+          updateRun(db, run.id, "failed");
+          // 失败兜底:仅在最后一次产物仍能解析为合法契约时才落库。否则 lastMarkdown 是
+          // 对话日志/思考过程(clarify agent 把契约写文件、assistant.text 只剩思考时),
+          // 落库会污染 contracts 表 —— 历史 source=clarifier/blocked 的空壳即来源于此。
+          if (lastMarkdown.length > 0 && parseContract(lastMarkdown).ok) {
+            try {
+              const written = writeContractFile({ sandboxPath, cellId, markdown: lastMarkdown });
+              createContract(db, {
+                cellId,
+                status: "blocked",
+                markdownPath: written.absPath,
+                contentHash: hashMarkdown(lastMarkdown),
+                source: "clarifier",
+                projectId,
+                originPath: written.absPath,
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+          updateCellAgentStatus(db, cellId, "blocked");
+          emit({ type: "done", runId: run.id, status: "blocked", issues: lastIssues });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          updateRun(db, run.id, "failed");
+          updateCellAgentStatus(db, cellId, "blocked");
+        } catch {
+          /* ignore */
+        }
+        emit({ type: "error", message });
+      }
+    } finally {
+      // 后台任务结束:调度清理该 run 的内存 emitter(延迟,供 SSE 尾部事件消费)。
+      scheduleEmitterCleanup(run.id);
+    }
+  })();
+
+  return NextResponse.json({ runId: run.id, cellId });
 }
 // ---------------------------------------------------------------------------
 // 分层分析(契约产出后,推断该需求在 DDD 四层的归属)

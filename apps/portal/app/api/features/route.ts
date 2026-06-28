@@ -1,8 +1,8 @@
 import { getDb } from "@/lib/db";
-import { getCurrentProjectId } from "@/lib/project";
 import {
   createFeatureManual,
   createScenarioManual,
+  generateFeatureId,
   upsertFeatureScenario,
 } from "@helmflow/storage";
 import { NextResponse } from "next/server";
@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 // ---------------------------------------------------------------------------
 // POST /api/features — 创建功能(含默认场景)
+//   用户只输入 名称 + 描述 + 域;编号(ID)按"域前缀+递增序号"自动生成。
 // ---------------------------------------------------------------------------
 export async function POST(req: Request): Promise<Response> {
   let body: Record<string, unknown>;
@@ -21,16 +22,9 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const id = typeof body.id === "string" ? body.id.trim() : "";
   const domain = typeof body.domain === "string" ? body.domain.trim() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
 
-  if (!id || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id)) {
-    return NextResponse.json(
-      { error: "功能 ID 格式错误:仅限字母、数字、连字符、下划线" },
-      { status: 400 },
-    );
-  }
   if (!domain) {
     return NextResponse.json({ error: "域不能为空" }, { status: 400 });
   }
@@ -38,24 +32,20 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "功能名称不能为空" }, { status: 400 });
   }
 
-  const handler = typeof body.handler === "string" ? body.handler : "";
-  const actions = typeof body.actions === "string" ? body.actions : "";
-  const context = typeof body.context === "string" ? body.context : "";
-  const priority = typeof body.priority === "string" ? body.priority : "";
-
-  const projectId = typeof body.projectId === "string" ? body.projectId : "";
+  const description = typeof body.description === "string" ? body.description : "";
+  const projectId = (typeof body.projectId === "string" ? body.projectId : "") || "mycmdeliverhub";
 
   const db = getDb();
   try {
+    // 编号自动生成(域前缀 + 递增序号,含 archived 统计 → 软删除不影响编号)
+    const id = generateFeatureId(db, projectId, domain);
+
     const feature = createFeatureManual(db, {
       id,
-      projectId: projectId || "mycmdeliverhub",
+      projectId,
       domain,
       name,
-      handler,
-      actions,
-      context,
-      priority,
+      description,
     });
 
     // 创建默认场景
@@ -104,8 +94,6 @@ export async function POST(req: Request): Promise<Response> {
         });
       }
     }
-
-    // 清除 matrix sync 标记使下次加载时刷新
 
     return NextResponse.json({ feature }, { status: 201 });
   } catch (err) {

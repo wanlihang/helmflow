@@ -47,6 +47,7 @@ export interface Scenario {
 export interface Feature {
   id: string;
   name: string;
+  description: string;
   implementation: Implementation;
   priority: FeaturePriority;
   scenarios: Scenario[];
@@ -104,6 +105,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   mapping: "产品映射",
   pricing: "价格配置",
   signing: "签约",
+  product: "产品映射管理",
   ops: "运维",
   shared: "共享",
 };
@@ -162,6 +164,7 @@ export function loadMatrix(projectId?: string): FeatureMatrix {
     const f: Feature = {
       id: row.id,
       name: row.name,
+      description: row.description ?? "",
       implementation: {
         decider: row.decider ?? "",
         acceptor: row.acceptor ?? "",

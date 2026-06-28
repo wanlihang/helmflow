@@ -8,7 +8,7 @@ import {
   emitEvent,
   runOrchestrator,
 } from "@helmflow/orchestrator";
-import { getContractById } from "@helmflow/storage";
+import { getContractById, getRuntimeSettings } from "@helmflow/storage";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 interface RequestBody {
   contractId?: unknown;
+  startNode?: unknown;
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -28,6 +29,14 @@ export async function POST(req: Request): Promise<Response> {
   if (!isString(body.contractId) || body.contractId.length === 0) {
     return NextResponse.json({ error: "contractId is required" }, { status: 400 });
   }
+
+  // 起始节点(默认 clarify):Plan 定稿后 Act 可传 "code" 跳过 clarify 直奔执行
+  const VALID_START_NODES = ["clarify", "code", "test", "deploy"] as const;
+  const startNodeRaw = typeof body.startNode === "string" ? body.startNode : undefined;
+  const startNode =
+    startNodeRaw && (VALID_START_NODES as readonly string[]).includes(startNodeRaw)
+      ? (startNodeRaw as "clarify" | "code" | "test" | "deploy")
+      : undefined;
 
   const db = getDb();
   const contract = getContractById(db, body.contractId);
@@ -43,9 +52,13 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const guard = guardCellOperable(db, contract.cellId);
-  if (!guard.ok) {
-    return NextResponse.json({ error: guard.error }, { status: guard.status });
+  // 需求驱动通路:requirement-owned 契约(虚拟 cell)跳过 cell operable guard,
+  // approved 即执行资格。矩阵通路仍按 cell scenarioStatus 守卫。
+  if (!contract.requirementId) {
+    const guard = guardCellOperable(db, contract.cellId);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
   }
 
   const sandboxPath = await resolveSandboxPath();
@@ -67,6 +80,13 @@ export async function POST(req: Request): Promise<Response> {
 
   createRunEmitter(superRunId);
 
+  // 运行参数(平台一等公民,前端 /llm 可配):注入 process.env,供 runOrchestrator/runNode 读取。
+  // 单机单用户场景,进程级 env 注入可接受;默认 skip_deploy=on → 最短闭环(test 过即 done)。
+  const settings = getRuntimeSettings(db);
+  process.env.HELMFLOW_SKIP_DEPLOY = settings.skipDeploy ? "1" : "0";
+  process.env.HELMFLOW_TURNS_PER_SESSION = String(settings.turnsPerSession);
+  process.env.HELMFLOW_TURN_INTERVAL_MS = String(settings.turnIntervalMs);
+
   // Wrap orchestrator in error handler so crashes are emitted to SSE
   void (async () => {
     try {
@@ -77,6 +97,7 @@ export async function POST(req: Request): Promise<Response> {
         portalCwd,
         superRunId,
         helmcodeRoot,
+        ...(startNode ? { startNode } : {}),
         emit: (event: OrchestratorEvent) => {
           emitEvent(superRunId, event);
         },
