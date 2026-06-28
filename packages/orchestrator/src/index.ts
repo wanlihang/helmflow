@@ -13,6 +13,7 @@ export {
   buildReflectionAppendix,
   buildFixTaskAppendix,
 } from "./prompt-builder";
+export { runDeployNode } from "./node-runners/deploy";
 export type {
   OrchestratorEvent,
   OrchestratorNode,

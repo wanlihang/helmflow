@@ -2,8 +2,8 @@ import type { NodeRunEvent } from "@helmflow/agent-runner";
 import type { DB } from "@helmflow/storage";
 import type { FailReason, PipelineNode } from "./state-machine";
 
-/** 旧 4 节点类型(向后兼容,deprecated) */
-export type OrchestratorNode = PipelineNode | "coder" | "testgen" | "qa" | "committer";
+/** 节点类型别名(旧 coder/testgen/qa/committer 已废弃,统一为 PipelineNode) */
+export type OrchestratorNode = PipelineNode;
 
 export type OrchestratorEvent =
   | { type: "orchestrator-start"; superRunId: string; cellId: string; contractId: string }
@@ -23,10 +23,18 @@ export type OrchestratorEvent =
     }
   | { type: "fix-task-created"; fixTaskId: string; failedAcId: string; routeTo: PipelineNode }
   | { type: "reflection-created"; reflectionId: string; nodeName: string }
-  | { type: "loop-iteration"; loop: number; maxLoops: number; routeTo: PipelineNode }
+  | { type: "loop-iteration"; loop: number; maxLoops: number; routeTo: PipelineNode; infraRetry?: boolean; infraBackoffMs?: number }
   | { type: "escalate"; reason: string; loop: number }
   | { type: "worktree-merge"; success: boolean; error?: string }
   | { type: "worktree-retained"; worktreePath: string; reason: string }
+  | {
+      type: "pending-confirm";
+      runId: string;
+      worktreePath: string;
+      branchName: string;
+      targetBranch: string;
+      mode: "local" | "deploy";
+    }
   | {
       type: "done";
       success: boolean;
@@ -46,6 +54,8 @@ export interface OrchestratorOptions {
   superRunId: string;
   /** HelmCode 仓库绝对路径,用于 resolveSkillPath */
   helmcodeRoot?: string;
+  /** 起始节点(默认 clarify);Plan 定稿后 Act 可传 code 跳过 clarify */
+  startNode?: PipelineNode;
   emit: (event: OrchestratorEvent) => void;
 }
 
