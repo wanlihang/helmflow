@@ -28,9 +28,15 @@ export interface NodeRunOptions {
   additionalDirectories?: string[];
   // 流式事件回调。返回 false 可早停(暂未启用,占位)。
   onEvent?: (event: NodeRunEvent) => void;
+  // 续接已有 session(claude-agent-sdk resume):传 sessionId 则 query resume 续上下文,
+  // 用于交互式注入(用户在 run-detail 手动续聊/输 /命令)。不传则新 session。
+  resumeSessionId?: string;
 }
 
-export type NodeRunEvent =
+// phase 标记事件来自主实现(primary)还是对抗式自检(self-check)轮,前端据此区分展示。
+export type NodeRunEvent = {
+  phase?: "primary" | "self-check";
+} & (
   | { type: "system.init"; sessionId: string; cwd: string; model: string }
   | { type: "agent.input"; systemPrompt: string; userPrompt: string }
   | { type: "assistant.text"; text: string }
@@ -57,7 +63,11 @@ export type NodeRunEvent =
       costUsd?: number;
       // SDK 报错时,error message 透出供 UI 调试
       error?: string;
-    };
+    }
+);
+
+/** 错误归类:transient-infra=529/网络等可退避重试的基础设施错误;fatal=业务失败。 */
+export type ErrorKind = "transient-infra" | "fatal";
 
 export interface NodeRunResult {
   success: boolean;
@@ -66,4 +76,6 @@ export interface NodeRunResult {
   costUsd?: number;
   sessionId?: string;
   error?: string;
+  /** 失败时的错误归类(供 orchestrator 区分 infra 退避重试 vs 业务回退)。success 时不设。 */
+  errorKind?: ErrorKind;
 }

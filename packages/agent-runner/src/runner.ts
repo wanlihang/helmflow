@@ -1,6 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AllowedTool,
+  ErrorKind,
   NodeRunEvent,
   NodeRunOptions,
   NodeRunResult,
@@ -14,11 +15,12 @@ const DEFAULT_TURNS_PER_SESSION = 15;
 // 限流/过载退避(529/429):端点临时过载时指数退避重试,而非立即 fail。
 // 否则 worker 在限流期间会反复无效重试、烧时间却拿不到结果(7×24 鲁棒性关键)。
 // ---------------------------------------------------------------------------
-// 限流退避:智谱等端点对密集程序化调用 RPM/TPM 限流较严,退避需拉长到分钟级让窗口真正恢复。
-// 8 次 × 指数(5s→10s→20s→40s→80s→160s→320s→600s),累计约 20min。
-const MAX_RATELIMIT_RETRIES = 8;
+// 限流退避:智谱等端点对密集程序化调用 RPM/TPM 限流较严,退避需拉长让窗口恢复。
+// 3 次 × 指数(5s→10s→20s),累计约 35s。claude-agent-sdk 内部每请求已重试 2 次,
+// helmflow 层再叠 8 次会密集撞限流 — 收敛到 3 次,配合 worker 全局冷却足够。
+const MAX_RATELIMIT_RETRIES = 3;
 const BASE_BACKOFF_MS = 5_000;
-const MAX_BACKOFF_MS = 600_000;
+const MAX_BACKOFF_MS = 60_000;
 
 function isRateLimitError(error: string | undefined): boolean {
   if (!error) return false;
@@ -29,6 +31,24 @@ function rateLimitSignal(error: string | undefined): string {
   if (!error) return "unknown";
   const m = error.match(/(529|429)/);
   return m && m[1] ? m[1] : "overloaded";
+}
+
+// 网络层瞬时错误(连接重置/超时/DNS/网关):与限流同属 transient-infra,可退避重试。
+// 实测智谱端点除 529 外还会 ECONNRESET("Unable to connect to API"),需一并归类,
+// 否则被当成业务失败(spec-rejected)立即回退重试,纯烧配额。
+const NETWORK_ERROR_RE =
+  /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EPIPE|FETCH_ERROR|socket hang up|Unable to connect to API|getaddrinfo|network error/i;
+
+/** 归类错误:限流/网络 → transient-infra(可退避重试);其余 → fatal(业务失败)。 */
+export function classifyError(error: string | undefined): ErrorKind {
+  if (!error) return "fatal";
+  if (isRateLimitError(error) || NETWORK_ERROR_RE.test(error)) return "transient-infra";
+  return "fatal";
+}
+
+/** 供 worker/orchestrator 复用的 transient 判定(替代裸正则,消除重复)。 */
+export function isTransientInfraError(error: string | undefined): boolean {
+  return classifyError(error) === "transient-infra";
 }
 
 function sleep(ms: number): Promise<void> {
@@ -153,6 +173,9 @@ async function runSingleSession(
           append: opts.systemPrompt,
         },
         env: processEnv,
+        model: processEnv.ANTHROPIC_MODEL,
+        // resume 续接已有 session(交互式注入):传 sessionId 则续上下文,不重发 system prompt
+        ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
       },
     });
 
@@ -332,7 +355,10 @@ ${sessionResult.lastAssistantText.slice(-1000)}
   };
   if (totalCostUsd !== undefined) result.costUsd = totalCostUsd;
   if (lastSessionId) result.sessionId = lastSessionId;
-  if (lastError && !lastSuccess) result.error = lastError;
+  if (lastError && !lastSuccess) {
+    result.error = lastError;
+    result.errorKind = classifyError(lastError);
+  }
 
   opts.onEvent?.({
     type: "result",

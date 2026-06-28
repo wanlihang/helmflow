@@ -1,4 +1,4 @@
-export { runNode } from "./runner";
+export { runNode, classifyError, isTransientInfraError } from "./runner";
 export { runClassify } from "./classify";
 export {
   loadSkillBody,
@@ -7,6 +7,7 @@ export {
 } from "./skill";
 export type {
   AllowedTool,
+  ErrorKind,
   NodeRunOptions,
   NodeRunEvent,
   NodeRunResult,
